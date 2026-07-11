@@ -87,7 +87,13 @@ fi
 
 if [[ ! -f "$CONFIG_ENV" ]]; then
   echo "Заполни параметры нового сервера A:"
-  read -rp "  IP этого сервера (A_IP): " A_IP
+  DETECTED_IP=$(curl -4 -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I 2>/dev/null | cut -d' ' -f1)
+  read -rp "  IP этого сервера (A_IP) [${DETECTED_IP:-неизвестно}]: " A_IP
+  A_IP=${A_IP:-$DETECTED_IP}
+  if [[ -z "$A_IP" ]]; then
+    echo "Не удалось определить IP автоматически, введи вручную."
+    read -rp "  IP этого сервера (A_IP): " A_IP
+  fi
   read -rp "  Домен этого сервера (A_DOMAIN, напр. h3.example.com): " A_DOMAIN
   read -rp "  Email для ACME/Let's Encrypt: " ACME_EMAIL
   read -rp "  WireGuard порт [51820]: " WG_PORT; WG_PORT=${WG_PORT:-51820}
@@ -146,11 +152,11 @@ cp "$SCRIPT_DIR/templates/stats.proto" /opt/vpn/stats.proto
 cp "$SCRIPT_DIR/vpn-setup.sh" /root/vpn-setup.sh
 chmod +x /root/vpn-setup.sh
 
-cat > /root/vpnctl <<EOF
+cat > /root/sb-panel <<EOF
 #!/usr/bin/env bash
 VPN_CONFIG=$CONFIG_ENV exec /root/vpn-setup.sh "\$@"
 EOF
-chmod +x /root/vpnctl
+chmod +x /root/sb-panel
 
 step "9/9 — nginx для раздачи профилей + cron"
 cat > /etc/nginx/conf.d/singbox-ua.conf <<'NGINX'
@@ -217,7 +223,7 @@ SVCUNIT
 systemctl daemon-reload
 systemctl enable --now nginx-cert-reload.path
 
-(crontab -l 2>/dev/null | grep -v 'cron-traffic'; echo "*/15 * * * * /usr/bin/bash /root/vpn-setup.sh --cron-traffic >/dev/null 2>&1") | crontab -
+(crontab -l 2>/dev/null | grep -v 'cron-traffic' || true; echo "*/15 * * * * /usr/bin/bash /root/vpn-setup.sh --cron-traffic >/dev/null 2>&1") | crontab -
 
 step "ГОТОВО"
 cat <<MSG
@@ -232,11 +238,11 @@ cat <<MSG
 
 2) Создай первого клиента (сертификат получится автоматически при первом
    старте sing-box внутри rebuild_config):
-   /root/vpnctl
+   /root/sb-panel
    -> 1 (создать клиента)
 
 3) Проверь: systemctl status sing-box ; systemctl status nginx
 
-Управление: /root/vpnctl
+Управление: /root/sb-panel
 Конфиг сервера: $CONFIG_ENV
 MSG
