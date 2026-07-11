@@ -1,0 +1,45 @@
+{
+  "endpoints": [ __WG_ENDPOINT__ ],
+  "outbounds": [
+    { "tag": "direct", "type": "direct" },
+    __OUTBOUND_TAIL__
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "default_domain_resolver": "dns-local",
+    "final": "Select",
+    "rule_set": [
+      { "tag": "geoip-russia", "type": "remote", "format": "binary", "url": "https://unicorns.kz/sources/geoip/geoip-ru.srs", "download_detour": "Select" }
+    ],
+    "rules": [
+      { "action": "sniff", "timeout": "1s" },
+      { "protocol": "dns", "action": "hijack-dns" },
+      { "protocol": "bittorrent", "outbound": "direct" },
+      { "protocol": "quic", "port": [443], "action": "reject" },
+      { "port": [25,465,587,143,993,110,995], "outbound": "direct" },
+      { "ip_cidr": ["224.0.0.0/3","ff00::/8"], "source_ip_cidr": ["224.0.0.0/3","ff00::/8"], "action": "reject" },
+      { "domain_keyword": ["habr"], "outbound": "Select" },
+      { "domain_suffix": ["reddit.com"], "domain_regex": [".*\\.ru$"], "outbound": "direct" },
+      { "rule_set": ["geoip-russia"], "outbound": "direct" }
+    ]
+  },
+  "experimental": {
+    "clash_api": { "external_controller": "127.0.0.1:9090" },
+    "cache_file": { "enabled": true, "path": "cache.db", "store_fakeip": true }
+  },
+  "dns": {
+    "servers": [
+      { "type": "tcp", "tag": "dns-remote", "server": "1.1.1.1", "detour": "Select" },
+      { "type": "udp", "tag": "dns-local", "server": "8.8.8.8" }
+    ],
+    "rules": [
+      { "domain": ["github.com","githubusercontent.com","raw.githubusercontent.com"], "server": "dns-local" }
+    ],
+    "final": "dns-local",
+    "strategy": "prefer_ipv4"
+  },
+  "inbounds": [
+    { "type": "tun", "tag": "tun-in", "interface_name": "tun0", "address": ["172.19.0.1/30"], "mtu": 9000, "auto_route": true, "strict_route": true, "endpoint_independent_nat": true },
+    { "listen": "127.0.0.1", "listen_port": 2334, "tag": "mixed-in", "type": "mixed" }
+  ]
+}
