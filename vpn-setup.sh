@@ -25,6 +25,7 @@ source "$CONFIG_FILE"
 : "${VLESS_PORT:=443}"
 : "${VLESS_DEST:?VLESS_DEST не задан в config.env}"
 : "${VLESS_SNI:=$VLESS_DEST}"
+: "${VLESS_INTERNAL_PORT_PRIMARY:=20000}"
 : "${AVAILABLE_PROXY_TYPES:=hy2 vless}"
 ### ─────────────────────────────────────────────────────────
 
@@ -32,6 +33,7 @@ AIPS_SPLIT='"0.0.0.0/5","8.0.0.0/7","11.0.0.0/8","12.0.0.0/6","16.0.0.0/4","32.0
 AIPS_FULL='"0.0.0.0/0","::/0"'
 
 DIR=/etc/sing-box
+REALITY_DOMAINS_FILE=$DIR/reality-domains.env
 BASE=$DIR/base.env
 CLI=$DIR/clients
 WGD=$DIR/clients/wg
@@ -48,6 +50,58 @@ TRAFFIC_STATE="$TRAFFIC_DIR/state.env"
 TRAFFIC_TOTALS="$TRAFFIC_DIR/totals.env"
 GRPC_PROTO=/opt/vpn/stats.proto
 mkdir -p "$TRAFFIC_DIR" "$TRAFFIC_DAILY"
+
+
+# список всех VLESS-доменов: "domain:internal_port", первая строка всегда основной (из config.env)
+list_vless_domains() {
+  echo "${VLESS_DEST}:__primary__"
+  [[ -f "$REALITY_DOMAINS_FILE" ]] && cat "$REALITY_DOMAINS_FILE"
+}
+
+next_internal_port() {
+  local used n
+  used=$( { [[ -f "$REALITY_DOMAINS_FILE" ]] && cut -d: -f2 "$REALITY_DOMAINS_FILE"; } 2>/dev/null )
+  for n in $(seq 20001 20099); do
+    echo "$used" | grep -qx "$n" || { echo "$n"; return; }
+  done
+  echo "ERR"; return 1
+}
+
+
+write_nginx_stream() {
+  local map_entries="" vd_line vd_dom vd_port first=1
+  local -a vd_all
+  mapfile -t vd_all < <(list_vless_domains)
+  for vd_line in "${vd_all[@]}"; do
+    vd_dom="${vd_line%%:*}"
+    vd_port="${vd_line##*:}"
+    [[ "$vd_port" == "__primary__" ]] && vd_port="$VLESS_INTERNAL_PORT_PRIMARY"
+    map_entries="${map_entries}    ${vd_dom} 127.0.0.1:${vd_port};\n"
+  done
+
+  mkdir -p /etc/nginx/stream.d
+  {
+    echo "map \$ssl_preread_server_name \$vless_backend {"
+    printf "%b" "$map_entries"
+    echo "    default 127.0.0.1:${VLESS_INTERNAL_PORT_PRIMARY};"
+    echo "}"
+    echo
+    echo "server {"
+    echo "    listen ${VLESS_PORT};"
+    echo "    listen [::]:${VLESS_PORT};"
+    echo "    ssl_preread on;"
+    echo "    proxy_pass \$vless_backend;"
+    echo "}"
+  } > /etc/nginx/stream.d/vless-reality.conf
+
+  if ! grep -q "stream.d/\*.conf" /etc/nginx/nginx.conf 2>/dev/null; then
+    if ! grep -q "^stream {" /etc/nginx/nginx.conf 2>/dev/null; then
+      printf '\nstream {\n    include /etc/nginx/stream.d/*.conf;\n}\n' >> /etc/nginx/nginx.conf
+    fi
+  fi
+
+  nginx -t && systemctl restart nginx
+}
 
 ensure_base() {
   [[ -f "$BASE" ]] && return
@@ -93,16 +147,23 @@ rebuild_config() {
     fi
   done
   [[ -z "$users" ]] && users='{ "password": "__none__" }'
-  local vless_inbound=""
+  local vless_inbound="" vd_line vd_dom vd_port
+  local -a vd_all
+  mapfile -t vd_all < <(list_vless_domains)
   if [[ -n "$vlusers" ]]; then
-    vless_inbound=",
-    { \"type\": \"vless\", \"tag\": \"vless-in\", \"listen\": \"::\", \"listen_port\": ${VLESS_PORT},
+    for vd_line in "${vd_all[@]}"; do
+      vd_dom="${vd_line%%:*}"
+      vd_port="${vd_line##*:}"
+      [[ "$vd_port" == "__primary__" ]] && vd_port="$VLESS_INTERNAL_PORT_PRIMARY"
+      vless_inbound="${vless_inbound},
+    { \"type\": \"vless\", \"tag\": \"vless-in-${vd_dom}\", \"listen\": \"127.0.0.1\", \"listen_port\": ${vd_port},
       \"users\": [ ${vlusers} ],
-      \"tls\": { \"enabled\": true, \"server_name\": \"${VLESS_SNI}\",
+      \"tls\": { \"enabled\": true, \"server_name\": \"${vd_dom}\",
         \"reality\": { \"enabled\": true,
-          \"handshake\": { \"server\": \"${VLESS_DEST}\", \"server_port\": 443 },
+          \"handshake\": { \"server\": \"${vd_dom}\", \"server_port\": 443 },
           \"private_key\": \"${REALITY_PRIV}\",
           \"short_id\": [\"${REALITY_SID}\"] } } }"
+    done
   fi
   local b_vless_outbound="" b_opts="\"direct\",\"hy2-out\""
   local transport_file=/etc/sing-box/transport.env
@@ -174,6 +235,8 @@ SRV
     gen_profile_quiet "$rkey" >/dev/null 2>&1 || true
   done
   echo "Клиентские профили пересобраны ($(ls "$CLI"/*.env 2>/dev/null | wc -l) шт.)."
+
+  write_nginx_stream
 }
 
 wg_endpoint_json() {
@@ -193,14 +256,40 @@ hy2_outbound_json() {
 HY
 }
 
-vless_outbound_json() {
+# генерирует ОДИН блок для конкретного домена: $1=домен
+vless_outbound_json_for_domain() {
+  local dom="$1"
   cat <<VL
-{ "type": "vless", "tag": "${VLESS_DEST}_${PROFILE}_vless", "server": "${A_DOMAIN}", "server_port": ${VLESS_PORT},
+{ "type": "vless", "tag": "${dom}_${PROFILE}_vless", "server": "${A_DOMAIN}", "server_port": ${VLESS_PORT},
   "uuid": "${VLESS_UUID}", "flow": "xtls-rprx-vision",
-  "tls": { "enabled": true, "server_name": "${VLESS_SNI}",
+  "tls": { "enabled": true, "server_name": "${dom}",
     "utls": { "enabled": true, "fingerprint": "chrome" },
     "reality": { "enabled": true, "public_key": "${REALITY_PUB}", "short_id": "${REALITY_SID}" } } }
 VL
+}
+
+# печатает блоки для ВСЕХ активных доменов, через запятую с переносом (для вставки в массив outbounds)
+vless_outbound_json() {
+  local vd_line vd_dom first=1
+  local -a vd_all
+  mapfile -t vd_all < <(list_vless_domains)
+  for vd_line in "${vd_all[@]}"; do
+    vd_dom="${vd_line%%:*}"
+    [[ $first -eq 0 ]] && printf ',\n'
+    vless_outbound_json_for_domain "$vd_dom"
+    first=0
+  done
+}
+
+# список тегов VLESS (по одному на домен) — нужен для selector/urltest
+vless_tags() {
+  local vd_line vd_dom
+  local -a vd_all
+  mapfile -t vd_all < <(list_vless_domains)
+  for vd_line in "${vd_all[@]}"; do
+    vd_dom="${vd_line%%:*}"
+    echo "${vd_dom}_${PROFILE}_vless"
+  done
 }
 
 outbound_json_for() {
@@ -230,20 +319,20 @@ proxy_tag_for() {  # $1 = wg | hy2 | vless
 }
 
 urltest_json() {
-  local opts="" first=1 pt count=0 tag
+  local opts="" first=1 tag count=0
   if [[ -n "${WG_PUB:-}" ]]; then
     tag=$(proxy_tag_for wg)
     opts+="\"${tag}\""
     first=0
     count=$((count+1))
   fi
-  for pt in $(client_proxy_types); do
-    tag=$(proxy_tag_for "$pt")
+  while IFS= read -r tag; do
+    [[ -z "$tag" ]] && continue
     [[ $first -eq 0 ]] && opts+=","
     opts+="\"${tag}\""
     first=0
     count=$((count+1))
-  done
+  done < <(all_proxy_tags)
   [[ $count -lt 2 ]] && return 1
   cat <<UT
 { "type": "urltest", "tag": "auto",
@@ -254,21 +343,34 @@ urltest_json() {
 UT
 }
 
+# все теги proxy-протоколов клиента: hy2 -> 1 тег, vless -> N тегов (по числу доменов)
+all_proxy_tags() {
+  local pt tag
+  for pt in $(client_proxy_types); do
+    if [[ "$pt" == "vless" ]]; then
+      vless_tags
+    else
+      echo "${A_DOMAIN}_${PROFILE}_${pt}"
+    fi
+  done
+}
+
 selector_json() {
-  local opts="" first=1 def_tag="" pt has_proxy=0 tag
+  local opts="" first=1 def_tag="" tag has_proxy=0
   if [[ -n "${WG_PUB:-}" ]]; then
     tag=$(proxy_tag_for wg)
     opts+="\"${tag}\""
     first=0
     def_tag="${tag}"
   fi
-  for pt in $(client_proxy_types); do
+  while IFS= read -r tag; do
+    [[ -z "$tag" ]] && continue
     has_proxy=1
-    tag=$(proxy_tag_for "$pt")
     [[ $first -eq 0 ]] && opts+=","
     opts+="\"${tag}\""
     first=0
-  done
+    def_tag="${tag}"
+  done < <(all_proxy_tags)
   if [[ $has_proxy -eq 1 ]]; then
     [[ $first -eq 0 ]] && opts+=","
     opts+="\"auto\""
@@ -745,7 +847,8 @@ service_menu() {
   echo "  4) пересобрать и перезапустить конфиг"
   echo "  5) статистика трафика"
   echo "  6) управление транспортом A -> B"
-  local c; read -rp "Выбор [1-6]: " c
+  echo "  7) управление Reality-доменами"
+  local c; read -rp "Выбор [1-7]: " c
   case "$c" in
     1)
       list_names
@@ -782,6 +885,71 @@ service_menu() {
       ;;
     6)
       transport_menu
+      ;;
+    7)
+      reality_domains_menu
+      ;;
+    *) echo "неверно" ;;
+  esac
+}
+
+reality_domains_menu() {
+  echo "Reality-домены:"
+  echo "  1) показать список"
+  echo "  2) добавить домен"
+  echo "  3) удалить домен"
+  local c; read -rp "Выбор [1-3]: " c
+  case "$c" in
+    1)
+      echo "Активные Reality-домены:"
+      local vd_line vd_dom vd_port i=1
+      local -a vd_all
+      mapfile -t vd_all < <(list_vless_domains)
+      for vd_line in "${vd_all[@]}"; do
+        vd_dom="${vd_line%%:*}"; vd_port="${vd_line##*:}"
+        if [[ "$vd_port" == "__primary__" ]]; then
+          printf "  %d) %s  (основной, из config.env)\n" "$i" "$vd_dom"
+        else
+          printf "  %d) %s  (внутренний порт %s)\n" "$i" "$vd_dom" "$vd_port"
+        fi
+        i=$((i+1))
+      done
+      ;;
+    2)
+      read -rp "Новый домен для Reality (проверь TLS 1.3 заранее): " new_dom
+      [[ -z "$new_dom" ]] && { echo "пусто"; return; }
+      if list_vless_domains | cut -d: -f1 | grep -qx "$new_dom"; then
+        echo "'$new_dom' уже есть в списке"; return
+      fi
+      local newport; newport=$(next_internal_port)
+      [[ "$newport" == "ERR" ]] && { echo "нет свободных внутренних портов"; return; }
+      echo "${new_dom}:${newport}" >> "$REALITY_DOMAINS_FILE"
+      echo "Домен '$new_dom' добавлен (внутренний порт $newport)."
+      echo "Пересобираю конфиг и профили всех клиентов..."
+      rebuild_config
+      ;;
+    3)
+      local vd_line vd_dom vd_port i=1
+      local -a vd_all vd_removable
+      mapfile -t vd_all < <(list_vless_domains)
+      echo "Домены (основной нельзя удалить отсюда):"
+      for vd_line in "${vd_all[@]}"; do
+        vd_dom="${vd_line%%:*}"; vd_port="${vd_line##*:}"
+        [[ "$vd_port" == "__primary__" ]] && continue
+        printf "  %d) %s\n" "$i" "$vd_dom"
+        vd_removable+=("$vd_dom")
+        i=$((i+1))
+      done
+      if [[ ${#vd_removable[@]} -eq 0 ]]; then echo "Нечего удалять (кроме основного)."; return; fi
+      local n; read -rp "Номер для удаления: " n
+      [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#vd_removable[@]} )) || { echo "неверно"; return; }
+      local target="${vd_removable[$((n-1))]}"
+      read -rp "Удалить домен '$target'? Профили клиентов будут пересобраны. [y/N] " a
+      [[ "${a,,}" == "y" ]] || { echo "отмена"; return; }
+      grep -v "^${target}:" "$REALITY_DOMAINS_FILE" > "${REALITY_DOMAINS_FILE}.tmp" 2>/dev/null || true
+      mv -f "${REALITY_DOMAINS_FILE}.tmp" "$REALITY_DOMAINS_FILE" 2>/dev/null || true
+      echo "Домен '$target' удалён."
+      rebuild_config
       ;;
     *) echo "неверно" ;;
   esac
