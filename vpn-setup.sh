@@ -165,6 +165,15 @@ SRV
   systemctl enable --now sing-box >/dev/null 2>&1 || true
   systemctl restart sing-box
   echo "sing-box перезапущен."
+
+  # пересобрать все выданные клиентские профили (актуализирует теги/логику у всех разом)
+  local rf rkey
+  for rf in "$CLI"/*.env; do
+    [[ -e "$rf" ]] || continue
+    rkey=$(basename "$rf" .env)
+    gen_profile_quiet "$rkey" >/dev/null 2>&1 || true
+  done
+  echo "Клиентские профили пересобраны ($(ls "$CLI"/*.env 2>/dev/null | wc -l) шт.)."
 }
 
 wg_endpoint_json() {
@@ -372,6 +381,14 @@ PYEOF
   echo "  link:"
   echo "    sing-box://import-remote-profile?url=${enc}#${NAME// /_}"
   command -v qrencode >/dev/null 2>&1 && { echo "  QR:"; qrencode -t ansiutf8 "sing-box://import-remote-profile?url=${enc}#${NAME// /_}"; }
+}
+
+gen_profile_quiet() {  # $1 = ключ клиента, только пересобрать файлы, без вывода блоков
+  source "$BASE"
+  NAME=""; PROFILE=""; WG_PRIV=""; WG_PUB=""; IP=""; PASS=""; VLESS_UUID=""; AIPS=""; TOKEN=""
+  source "$CLI/$1.env"
+  local KEY="$1"
+  gen_profile
 }
 
 emit_client() {
