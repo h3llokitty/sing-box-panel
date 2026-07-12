@@ -510,9 +510,21 @@ emit_client() {
   fi
   local pt
   for pt in $(client_proxy_types); do
-    echo "--- блок ${pt} outbound (sing-box) ---"
-    outbound_json_for "$pt" | (jq . 2>/dev/null || cat)
-    echo
+    if [[ "$pt" == "vless" ]]; then
+      local vd_line vd_dom
+      local -a vd_all
+      mapfile -t vd_all < <(list_vless_domains)
+      for vd_line in "${vd_all[@]}"; do
+        vd_dom="${vd_line%%:*}"
+        echo "--- блок vless outbound (sing-box) [${vd_dom}] ---"
+        vless_outbound_json_for_domain "$vd_dom" | (jq . 2>/dev/null || cat)
+        echo
+      done
+    else
+      echo "--- блок ${pt} outbound (sing-box) ---"
+      outbound_json_for "$pt" | (jq . 2>/dev/null || cat)
+      echo
+    fi
   done
   local ut_preview; ut_preview=$(urltest_json 2>/dev/null) || ut_preview=""
   if [[ -n "$ut_preview" ]]; then
