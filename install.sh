@@ -7,8 +7,36 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MARKER=/etc/sing-box/.install-in-progress
 
 step() { echo; echo "=================================================="; echo "$1"; echo "=================================================="; }
+
+cleanup_failed_install() {
+  echo
+  echo "=================================================="
+  echo "УСТАНОВКА НЕ ЗАВЕРШИЛАСЬ (ошибка). Откатываю изменения..."
+  echo "=================================================="
+  systemctl stop sing-box nginx-cert-reload.path 2>/dev/null || true
+  systemctl disable sing-box nginx-cert-reload.path 2>/dev/null || true
+  rm -rf /etc/sing-box /opt/vpn /root/clients
+  rm -f /root/sb-panel /root/vpn-setup.sh
+  rm -f /etc/nginx/sites-enabled/profiles /etc/nginx/sites-available/profiles
+  rm -f /etc/nginx/conf.d/singbox-ua.conf
+  rm -f /etc/systemd/system/sing-box.service
+  rm -f /etc/systemd/system/nginx-cert-reload.path /etc/systemd/system/nginx-cert-reload.service
+  systemctl daemon-reload 2>/dev/null || true
+  echo "Откат завершён. Запусти install.sh ещё раз, чтобы попробовать заново."
+  echo "(sing-box бинарник в /usr/bin/sing-box и Go оставлены — переустановка будет быстрее)"
+}
+
+if [[ -f "$MARKER" ]]; then
+  echo "Обнаружена незавершённая предыдущая установка — выполняю откат перед повторной попыткой."
+  cleanup_failed_install
+fi
+
+mkdir -p /etc/sing-box
+touch "$MARKER"
+trap 'if [[ -f "$MARKER" ]]; then cleanup_failed_install; fi' ERR
 
 step "1/9 — базовые пакеты"
 apt-get update -qq
@@ -18,7 +46,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
 step "2/9 — установка Go (нужен для сборки sing-box)"
 if ! command -v go >/dev/null 2>&1; then
   GOVER="go1.26.5"
-  curl -sL "https://go.dev/dl/${GOVER}.linux-amd64.tar.gz" -o /tmp/go.tar.gz
+  curl -sL --max-time 120 "https://go.dev/dl/${GOVER}.linux-amd64.tar.gz" -o /tmp/go.tar.gz
   rm -rf /usr/local/go
   tar -C /usr/local -xzf /tmp/go.tar.gz
   echo 'export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin' > /etc/profile.d/go.sh
@@ -50,7 +78,7 @@ echo "sing-box собран успешно."
 step "4/9 — установка grpcurl"
 if ! command -v grpcurl >/dev/null 2>&1; then
   GRPCURL_VER="1.9.3"
-  curl -sL "https://github.com/fullstorydev/grpcurl/releases/download/v${GRPCURL_VER}/grpcurl_${GRPCURL_VER}_linux_amd64.deb" -o /tmp/grpcurl.deb
+  curl -sL --max-time 60 "https://github.com/fullstorydev/grpcurl/releases/download/v${GRPCURL_VER}/grpcurl_${GRPCURL_VER}_linux_amd64.deb" -o /tmp/grpcurl.deb
   dpkg -i /tmp/grpcurl.deb || apt-get install -f -y -qq
 fi
 grpcurl --version
@@ -346,6 +374,9 @@ systemctl daemon-reload
 systemctl enable --now nginx-cert-reload.path
 
 (crontab -l 2>/dev/null | grep -v 'cron-traffic' || true; echo "*/15 * * * * /usr/bin/bash /root/vpn-setup.sh --cron-traffic >/dev/null 2>&1") | crontab -
+
+rm -f "$MARKER"
+trap - ERR
 
 step "ГОТОВО"
 cat <<MSG
