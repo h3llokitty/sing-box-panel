@@ -104,7 +104,10 @@ rebuild_config() {
           \"private_key\": \"${REALITY_PRIV}\",
           \"short_id\": [\"${REALITY_SID}\"] } } }"
   fi
-  local b_vless_outbound="" b_selector="" b_final="hy2-out"
+  local b_vless_outbound="" b_opts="\"direct\",\"hy2-out\""
+  local transport_file=/etc/sing-box/transport.env
+  local TO_B_DEFAULT="hy2-out"
+  [[ -f "$transport_file" ]] && source "$transport_file"
   if [[ -n "${B_VLESS_UUID:-}" ]]; then
     b_vless_outbound=",
     { \"type\": \"vless\", \"tag\": \"vless-out-b\", \"server\": \"${B_DOMAIN}\", \"server_port\": ${B_PORT},
@@ -112,12 +115,18 @@ rebuild_config() {
       \"tls\": { \"enabled\": true, \"server_name\": \"${B_VLESS_SNI}\",
         \"utls\": { \"enabled\": true, \"fingerprint\": \"chrome\" },
         \"reality\": { \"enabled\": true, \"public_key\": \"${B_REALITY_PUB}\", \"short_id\": \"${B_REALITY_SID}\" } } }"
-    b_selector=",
-    { \"type\": \"selector\", \"tag\": \"to-b\",
-      \"outbounds\": [ \"hy2-out\", \"vless-out-b\" ],
-      \"default\": \"hy2-out\" }"
-    b_final="to-b"
+    b_opts="${b_opts},\"vless-out-b\""
   fi
+  # default должен быть среди реально доступных outbound'ов, иначе откатываемся на hy2-out
+  case ",${b_opts}," in
+    *"\"${TO_B_DEFAULT}\""*) : ;;
+    *) TO_B_DEFAULT="hy2-out" ;;
+  esac
+  local b_selector=",
+    { \"type\": \"selector\", \"tag\": \"to-b\",
+      \"outbounds\": [ ${b_opts} ],
+      \"default\": \"${TO_B_DEFAULT}\" }"
+  local b_final="to-b"
   cat > "$CONFIG" <<SRV
 {
   "log": { "level": "info", "timestamp": true },
@@ -718,7 +727,8 @@ service_menu() {
   echo "  3) живой мониторинг (tail -f, Ctrl+C для выхода)"
   echo "  4) пересобрать и перезапустить конфиг"
   echo "  5) статистика трафика"
-  local c; read -rp "Выбор [1-5]: " c
+  echo "  6) управление транспортом A -> B"
+  local c; read -rp "Выбор [1-6]: " c
   case "$c" in
     1)
       list_names
@@ -753,8 +763,38 @@ service_menu() {
     5)
       traffic_menu
       ;;
+    6)
+      transport_menu
+      ;;
     *) echo "неверно" ;;
   esac
+}
+
+transport_menu() {
+  local transport_file=/etc/sing-box/transport.env
+  local TO_B_DEFAULT="hy2-out"
+  [[ -f "$transport_file" ]] && source "$transport_file"
+
+  source "$BASE"
+  local opts=("direct" "hy2-out")
+  local labels=("direct (напрямую, минуя B)" "hy2-out (Hysteria2 к B)")
+  if [[ -n "${B_VLESS_UUID:-}" ]]; then
+    opts+=("vless-out-b")
+    labels+=("vless-out-b (VLESS+Reality к B)")
+  fi
+
+  echo "Транспорт A -> B (сейчас: ${TO_B_DEFAULT}):"
+  local i
+  for ((i=0; i<${#opts[@]}; i++)); do
+    printf "  %d) %s\n" "$((i+1))" "${labels[$i]}"
+  done
+  local n; read -rp "Выбор [1-${#opts[@]}]: " n
+  [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#opts[@]} )) || { echo "неверно"; return; }
+
+  local chosen="${opts[$((n-1))]}"
+  printf 'TO_B_DEFAULT="%s"\n' "$chosen" > "$transport_file"
+  echo "Транспорт A -> B переключён на: $chosen"
+  rebuild_config
 }
 
 edit_client() {
