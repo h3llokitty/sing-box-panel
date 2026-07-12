@@ -99,16 +99,47 @@ if [[ ! -f "$CONFIG_ENV" ]]; then
   read -rp "  WireGuard порт [51820]: " WG_PORT; WG_PORT=${WG_PORT:-51820}
   read -rp "  Hysteria2 порт [443]: " HY2_PORT; HY2_PORT=${HY2_PORT:-443}
   echo
-  echo "Сервер B (выходной узел, к которому A подключается по Hysteria2):"
-  read -rp "  Домен сервера B (B_DOMAIN): " B_DOMAIN
-  read -rp "  Порт сервера B [443]: " B_PORT; B_PORT=${B_PORT:-443}
-  read -rp "  Пароль Hysteria2 на сервере B (B_PASS): " B_PASS
+  echo "Сервер B (выходной узел, к которому A подключается):"
+  read -rp "  Уже есть настроенный сервер B? [Y/n] " HAS_B
+  B_NEEDS_INSTALL=0
+  if [[ "${HAS_B,,}" == "n" ]]; then
+    B_NEEDS_INSTALL=1
+    echo
+    echo "Сгенерирую секреты для B — после установки A получишь ссылку на install-b.sh,"
+    echo "которую нужно будет выполнить на самом сервере B."
+    read -rp "  Домен, который будет у сервера B (B_DOMAIN): " B_DOMAIN
+    read -rp "  Порт Hysteria2/VLESS на B [443]: " B_PORT; B_PORT=${B_PORT:-443}
+    B_PASS=$(openssl rand -base64 18 | tr -d '/+=')
+    B_VLESS_UUID=$(sing-box generate uuid)
+    B_RKEYS=$(sing-box generate reality-keypair)
+    B_REALITY_PRIV=$(echo "$B_RKEYS" | grep '^PrivateKey:' | awk '{print $2}')
+    B_REALITY_PUB=$(echo "$B_RKEYS" | grep '^PublicKey:' | awk '{print $2}')
+    B_REALITY_SID=$(sing-box generate rand 8 --hex)
+    echo
+    echo "Сайт для маскировки VLESS+Reality НА СЕРВЕРЕ B (может отличаться от A_DOMAIN):"
+    read -rp "  Домен для Reality на B (B_VLESS_DEST): " B_VLESS_DEST
+    B_VLESS_SNI="$B_VLESS_DEST"
+  else
+    read -rp "  Домен сервера B (B_DOMAIN): " B_DOMAIN
+    read -rp "  Порт сервера B [443]: " B_PORT; B_PORT=${B_PORT:-443}
+    read -rp "  Пароль Hysteria2 на сервере B (B_PASS): " B_PASS
+    read -rp "  Есть ли на B также VLESS+Reality? [y/N] " HAS_B_VLESS
+    if [[ "${HAS_B_VLESS,,}" == "y" ]]; then
+      read -rp "  UUID VLESS на B (B_VLESS_UUID): " B_VLESS_UUID
+      read -rp "  Public key Reality на B (B_REALITY_PUB): " B_REALITY_PUB
+      read -rp "  Short ID Reality на B (B_REALITY_SID): " B_REALITY_SID
+      read -rp "  Домен маскировки Reality на B (B_VLESS_DEST): " B_VLESS_DEST
+      B_VLESS_SNI="$B_VLESS_DEST"
+    else
+      B_VLESS_UUID=""; B_REALITY_PUB=""; B_REALITY_SID=""; B_VLESS_DEST=""; B_VLESS_SNI=""
+    fi
+  fi
   echo
   read -rp "  Порт раздачи профилей (nginx) [8443]: " PROFILE_PORT; PROFILE_PORT=${PROFILE_PORT:-8443}
   echo
-  echo "VLESS+Reality — сайт для маскировки (проверь через RealiTLScanner или openssl s_client,"
+  echo "VLESS+Reality на сервере A — сайт для маскировки (проверь через RealiTLScanner или openssl s_client,"
   echo "нужен реальный сайт с TLS 1.3, лучше глобальный сервис типа microsoft.com/apple.com):"
-  read -rp "  Домен для Reality (VLESS_DEST): " VLESS_DEST
+  read -rp "  Домен для Reality на A (VLESS_DEST): " VLESS_DEST
   VLESS_SNI="$VLESS_DEST"
 
   cat > "$CONFIG_ENV" <<EOF
@@ -121,6 +152,11 @@ HY2_PORT=$HY2_PORT
 B_DOMAIN="$B_DOMAIN"
 B_PORT=$B_PORT
 B_PASS="$B_PASS"
+B_VLESS_UUID="$B_VLESS_UUID"
+B_REALITY_PUB="$B_REALITY_PUB"
+B_REALITY_SID="$B_REALITY_SID"
+B_VLESS_DEST="$B_VLESS_DEST"
+B_VLESS_SNI="$B_VLESS_SNI"
 PROFILE_HOST="$A_DOMAIN"
 PROFILE_PORT=$PROFILE_PORT
 VLESS_PORT=$HY2_PORT
