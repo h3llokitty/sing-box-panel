@@ -104,6 +104,20 @@ rebuild_config() {
           \"private_key\": \"${REALITY_PRIV}\",
           \"short_id\": [\"${REALITY_SID}\"] } } }"
   fi
+  local b_vless_outbound="" b_selector="" b_final="hy2-out"
+  if [[ -n "${B_VLESS_UUID:-}" ]]; then
+    b_vless_outbound=",
+    { \"type\": \"vless\", \"tag\": \"vless-out-b\", \"server\": \"${B_DOMAIN}\", \"server_port\": ${B_PORT},
+      \"uuid\": \"${B_VLESS_UUID}\", \"flow\": \"xtls-rprx-vision\",
+      \"tls\": { \"enabled\": true, \"server_name\": \"${B_VLESS_SNI}\",
+        \"utls\": { \"enabled\": true, \"fingerprint\": \"chrome\" },
+        \"reality\": { \"enabled\": true, \"public_key\": \"${B_REALITY_PUB}\", \"short_id\": \"${B_REALITY_SID}\" } } }"
+    b_selector=",
+    { \"type\": \"selector\", \"tag\": \"to-b\",
+      \"outbounds\": [ \"hy2-out\", \"vless-out-b\" ],
+      \"default\": \"hy2-out\" }"
+    b_final="to-b"
+  fi
   cat > "$CONFIG" <<SRV
 {
   "log": { "level": "info", "timestamp": true },
@@ -123,9 +137,9 @@ rebuild_config() {
   "outbounds": [
     { "type": "direct", "tag": "direct" },
     { "type": "hysteria2", "tag": "hy2-out", "server": "${B_DOMAIN}", "server_port": ${B_PORT},
-      "password": "${B_PASS}", "tls": { "enabled": true, "server_name": "${B_DOMAIN}", "alpn": ["h3"] } }
+      "password": "${B_PASS}", "tls": { "enabled": true, "server_name": "${B_DOMAIN}", "alpn": ["h3"] } }${b_vless_outbound}${b_selector}
   ],
-  "route": { "rules": [ { "action": "sniff" }, { "protocol": "dns", "action": "hijack-dns" } ], "final": "hy2-out" },
+  "route": { "rules": [ { "action": "sniff" }, { "protocol": "dns", "action": "hijack-dns" } ], "final": "${b_final}" },
   "experimental": {
     "v2ray_api": {
       "listen": "127.0.0.1:8080",
