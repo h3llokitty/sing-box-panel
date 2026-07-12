@@ -378,6 +378,10 @@ SVCUNIT
 systemctl daemon-reload
 systemctl enable --now nginx-cert-reload.path
 
+# nginx мог быть остановлен на предыдущих шагах (или его конфиг изменился впервые) —
+# reload не поднимает остановленный сервис, поэтому явно restart
+nginx -t && systemctl restart nginx
+
 (crontab -l 2>/dev/null | grep -v 'cron-traffic' || true; echo "*/15 * * * * /usr/bin/bash /root/vpn-setup.sh --cron-traffic >/dev/null 2>&1") | crontab -
 
 rm -f "$MARKER"
