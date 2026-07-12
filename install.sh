@@ -8,6 +8,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MARKER=/etc/sing-box/.install-in-progress
+DONE_MARKER=/etc/sing-box/.install-done
 
 step() { echo; echo "=================================================="; echo "$1"; echo "=================================================="; }
 
@@ -28,6 +29,19 @@ cleanup_failed_install() {
   echo "Откат завершён. Запусти install.sh ещё раз, чтобы попробовать заново."
   echo "(sing-box бинарник в /usr/bin/sing-box и Go оставлены — переустановка будет быстрее)"
 }
+
+if [[ -f "$DONE_MARKER" ]]; then
+  echo "Обнаружена ЗАВЕРШЁННАЯ предыдущая установка (от $(cat "$DONE_MARKER" 2>/dev/null))."
+  echo "Повторная установка удалит ВСЕХ существующих клиентов и все секреты сервера."
+  read -rp "Точно хочешь переустановить с нуля? [y/N] " CONFIRM_REINSTALL
+  if [[ "${CONFIRM_REINSTALL,,}" != "y" ]]; then
+    echo "Отменено. Для управления клиентами используй: /root/sb-panel"
+    exit 0
+  fi
+  echo "Ок, сношу текущую установку перед переустановкой..."
+  cleanup_failed_install
+  rm -f "$DONE_MARKER"
+fi
 
 if [[ -f "$MARKER" ]]; then
   echo "Обнаружена незавершённая предыдущая установка — выполняю откат перед повторной попыткой."
@@ -385,6 +399,7 @@ nginx -t && systemctl restart nginx
 (crontab -l 2>/dev/null | grep -v 'cron-traffic' || true; echo "*/15 * * * * /usr/bin/bash /root/vpn-setup.sh --cron-traffic >/dev/null 2>&1") | crontab -
 
 rm -f "$MARKER"
+date > "$DONE_MARKER"
 trap - ERR
 
 step "ГОТОВО"
