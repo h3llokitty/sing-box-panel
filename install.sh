@@ -55,7 +55,7 @@ trap 'if [[ -f "$MARKER" ]]; then cleanup_failed_install; fi' ERR
 step "1/9 — базовые пакеты"
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-  curl git build-essential wireguard-tools nginx jq qrencode python3 openssl dnsutils
+  curl git build-essential wireguard-tools nginx libnginx-mod-stream jq qrencode python3 openssl dnsutils
 
 step "2/9 — установка Go (нужен для сборки sing-box)"
 if ! command -v go >/dev/null 2>&1; then
