@@ -147,7 +147,7 @@ SRV
 wg_endpoint_json() {
   [[ -z "${AIPS:-}" ]] && AIPS="$AIPS_FULL"
   cat <<WG
-{ "type": "wireguard", "tag": "${PROFILE}_wg", "system": false, "mtu": 1280,
+{ "type": "wireguard", "tag": "${A_DOMAIN}_${PROFILE}_wg", "system": false, "mtu": 1280,
   "address": ["${WG_NET}.${IP}/24"], "private_key": "${WG_PRIV}",
   "peers": [ { "address": "${A_IP}", "port": ${WG_PORT}, "public_key": "${A_PUB}",
     "pre_shared_key": "${WG_PSK}", "allowed_ips": [${AIPS}], "persistent_keepalive_interval": 25 } ] }
@@ -155,7 +155,7 @@ WG
 }
 hy2_outbound_json() {
   cat <<HY
-{ "type": "hysteria2", "tag": "${PROFILE}_hy2", "server": "${A_DOMAIN}", "server_port": ${HY2_PORT},
+{ "type": "hysteria2", "tag": "${A_DOMAIN}_${PROFILE}_hy2", "server": "${A_DOMAIN}", "server_port": ${HY2_PORT},
   "password": "${PASS}", "obfs": { "type": "salamander", "password": "${HY2_OBFS}" },
   "tls": { "enabled": true, "server_name": "${A_DOMAIN}", "alpn": ["h3"] } }
 HY
@@ -163,7 +163,7 @@ HY
 
 vless_outbound_json() {
   cat <<VL
-{ "type": "vless", "tag": "${PROFILE}_vless", "server": "${A_DOMAIN}", "server_port": ${VLESS_PORT},
+{ "type": "vless", "tag": "${VLESS_DEST}_${PROFILE}_vless", "server": "${A_DOMAIN}", "server_port": ${VLESS_PORT},
   "uuid": "${VLESS_UUID}", "flow": "xtls-rprx-vision",
   "tls": { "enabled": true, "server_name": "${VLESS_SNI}",
     "utls": { "enabled": true, "fingerprint": "chrome" },
@@ -186,16 +186,29 @@ client_proxy_types() {
   echo "$types"
 }
 
+
+# по типу прокси-протокола строит полный тег с доменом (WG/Hy2 -> A_DOMAIN, VLESS -> VLESS_DEST)
+proxy_tag_for() {  # $1 = wg | hy2 | vless
+  case "$1" in
+    wg)    echo "${A_DOMAIN}_${PROFILE}_wg" ;;
+    hy2)   echo "${A_DOMAIN}_${PROFILE}_hy2" ;;
+    vless) echo "${VLESS_DEST}_${PROFILE}_vless" ;;
+    *) echo "${PROFILE}_${1}" ;;
+  esac
+}
+
 urltest_json() {
-  local opts="" first=1 pt count=0
+  local opts="" first=1 pt count=0 tag
   if [[ -n "${WG_PUB:-}" ]]; then
-    opts+="\"${PROFILE}_wg\""
+    tag=$(proxy_tag_for wg)
+    opts+="\"${tag}\""
     first=0
     count=$((count+1))
   fi
   for pt in $(client_proxy_types); do
+    tag=$(proxy_tag_for "$pt")
     [[ $first -eq 0 ]] && opts+=","
-    opts+="\"${PROFILE}_${pt}\""
+    opts+="\"${tag}\""
     first=0
     count=$((count+1))
   done
@@ -210,16 +223,18 @@ UT
 }
 
 selector_json() {
-  local opts="" first=1 def_tag="" pt has_proxy=0
+  local opts="" first=1 def_tag="" pt has_proxy=0 tag
   if [[ -n "${WG_PUB:-}" ]]; then
-    opts+="\"${PROFILE}_wg\""
+    tag=$(proxy_tag_for wg)
+    opts+="\"${tag}\""
     first=0
-    def_tag="${PROFILE}_wg"
+    def_tag="${tag}"
   fi
   for pt in $(client_proxy_types); do
     has_proxy=1
+    tag=$(proxy_tag_for "$pt")
     [[ $first -eq 0 ]] && opts+=","
-    opts+="\"${PROFILE}_${pt}\""
+    opts+="\"${tag}\""
     first=0
   done
   if [[ $has_proxy -eq 1 ]]; then
