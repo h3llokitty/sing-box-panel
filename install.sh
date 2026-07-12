@@ -168,6 +168,92 @@ EOF
   echo "Записано в $CONFIG_ENV"
 fi
 
+if [[ "${B_NEEDS_INSTALL:-0}" == "1" ]]; then
+  echo
+  echo "Генерирую install-b.sh для сервера B..."
+  mkdir -p /opt/vpn/profiles
+  B_TOKEN=$(openssl rand -hex 8)
+  B_INSTALL_PATH="/opt/vpn/profiles/install-b-${B_TOKEN}.sh"
+
+  cat > "$B_INSTALL_PATH" <<BEOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ \$EUID -ne 0 ]]; then
+  echo "Запусти через sudo/root: sudo bash install-b.sh"
+  exit 1
+fi
+
+echo "Установка sing-box (выходной узел B)..."
+apt-get update -qq
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl gnupg
+
+mkdir -p /etc/apt/keyrings
+curl -fsSL https://sing-box.app/gpg.key -o /etc/apt/keyrings/sagernet.asc
+chmod a+r /etc/apt/keyrings/sagernet.asc
+cat > /etc/apt/sources.list.d/sagernet.sources <<'REPO'
+Types: deb
+URIs: https://deb.sagernet.org/
+Suites: *
+Components: *
+Enabled: yes
+Signed-By: /etc/apt/keyrings/sagernet.asc
+REPO
+apt-get update -qq
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sing-box
+
+mkdir -p /etc/sing-box
+
+cat > /etc/sing-box/config.json <<CFGEOF
+{
+  "log": { "level": "info", "timestamp": true },
+  "inbounds": [
+    {
+      "type": "hysteria2", "tag": "hy2-in", "listen": "::", "listen_port": ${B_PORT},
+      "users": [ { "password": "${B_PASS}" } ],
+      "tls": { "enabled": true, "server_name": "${B_DOMAIN}", "alpn": ["h3"],
+               "acme": { "domain": ["${B_DOMAIN}"], "email": "${ACME_EMAIL}" } }
+    },
+    {
+      "type": "vless", "tag": "vless-in", "listen": "::", "listen_port": ${B_PORT},
+      "users": [ { "uuid": "${B_VLESS_UUID}", "flow": "xtls-rprx-vision" } ],
+      "tls": { "enabled": true, "server_name": "${B_VLESS_SNI}",
+        "reality": { "enabled": true,
+          "handshake": { "server": "${B_VLESS_DEST}", "server_port": 443 },
+          "private_key": "${B_REALITY_PRIV}",
+          "short_id": ["${B_REALITY_SID}"] } }
+    }
+  ],
+  "outbounds": [ { "type": "direct", "tag": "direct" } ],
+  "route": { "rules": [ { "action": "sniff" } ], "final": "direct" }
+}
+CFGEOF
+
+sing-box check -c /etc/sing-box/config.json
+systemctl daemon-reload
+systemctl enable --now sing-box
+systemctl restart sing-box
+
+echo
+echo "=================================================="
+echo "Сервер B настроен."
+echo "  Домен:  ${B_DOMAIN}"
+echo "  Порт:   ${B_PORT} (Hysteria2 + VLESS+Reality на одном порту, TCP/UDP)"
+echo "=================================================="
+echo
+echo "Убедись, что DNS ${B_DOMAIN} указывает на этот сервер,"
+echo "и порт ${B_PORT} (TCP+UDP) и 80/TCP (для ACME) открыты в фаерволе."
+BEOF
+
+  chmod +x "$B_INSTALL_PATH"
+
+  echo "install-b.sh готов. Выполни на сервере B (после того как настроишь DNS для $B_DOMAIN):"
+  echo
+  echo "  curl -sL https://${A_DOMAIN}:${PROFILE_PORT:-8443}/$(basename "$B_INSTALL_PATH") | sudo bash"
+  echo
+  echo "(ссылка будет рабочей после завершения установки A и запуска nginx)"
+fi
+
 source "$CONFIG_ENV"
 
 step "7/9 — DNS-проверка"
