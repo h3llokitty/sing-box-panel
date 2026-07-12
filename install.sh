@@ -348,6 +348,11 @@ server {
         try_files \$uri =404;
         add_header Cache-Control "no-store";
     }
+    location ~ ^/install-b-[a-f0-9]+\.sh$ {
+        try_files \$uri =404;
+        default_type text/x-shellscript;
+        add_header Cache-Control "no-store";
+    }
     location / { return 404; }
 }
 NGINX2
