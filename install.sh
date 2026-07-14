@@ -215,6 +215,7 @@ VLESS_PORT=$HY2_PORT
 VLESS_DEST="$VLESS_DEST"
 VLESS_SNI="$VLESS_SNI"
 AVAILABLE_PROXY_TYPES="hy2 vless"
+LANG_CODE="$LANG_CODE"
 EOF
   chmod 600 "$CONFIG_ENV"
   printf "$(t config_written)\n" "$CONFIG_ENV"
@@ -323,6 +324,7 @@ cp "$SCRIPT_DIR/templates/template.json" /opt/vpn/template.json
 cp "$SCRIPT_DIR/templates/template-legacy.json" /opt/vpn/template-legacy.json
 cp "$SCRIPT_DIR/templates/stats.proto" /opt/vpn/stats.proto
 cp "$SCRIPT_DIR/vpn-setup.sh" /root/vpn-setup.sh
+cp "$SCRIPT_DIR/i18n.sh" /root/i18n.sh
 chmod +x /root/vpn-setup.sh
 
 cat > /root/sb-panel <<EOF

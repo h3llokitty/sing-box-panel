@@ -3,10 +3,11 @@ set -euo pipefail
 
 ### ── ПАРАМЕТРЫ (загружаются из config.env) ──────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/i18n.sh"
 CONFIG_FILE="${VPN_CONFIG:-$SCRIPT_DIR/config.env}"
 if [[ ! -f "$CONFIG_FILE" ]]; then
-  echo "Не найден config.env (искал: $CONFIG_FILE)"
-  echo "Скопируй config.env.example -> config.env и заполни своими значениями."
+  printf "$(t config_not_found)\n" "$CONFIG_FILE"
+  echo "$(t config_not_found_hint)"
   exit 1
 fi
 source "$CONFIG_FILE"
@@ -100,7 +101,12 @@ write_nginx_stream() {
     fi
   fi
 
-  nginx -t && systemctl restart nginx
+  local cert_path="/var/lib/sing-box/.local/share/certmagic/certificates/acme-v02.api.letsencrypt.org-directory/${A_DOMAIN}/${A_DOMAIN}.crt"
+  if [[ -f "$cert_path" ]]; then
+    nginx -t && systemctl restart nginx
+  else
+    printf "$(t cert_not_ready_yet)\n" "${A_DOMAIN}"
+  fi
 }
 
 ensure_base() {
