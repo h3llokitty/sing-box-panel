@@ -12,19 +12,19 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
 fi
 source "$CONFIG_FILE"
 
-: "${A_IP:?A_IP не задан в config.env}"
-: "${A_DOMAIN:?A_DOMAIN не задан в config.env}"
-: "${ACME_EMAIL:?ACME_EMAIL не задан в config.env}"
+: "${A_IP:?A_IP not set in config.env}"
+: "${A_DOMAIN:?A_DOMAIN not set in config.env}"
+: "${ACME_EMAIL:?ACME_EMAIL not set in config.env}"
 : "${WG_PORT:=51820}"
 : "${WG_NET:=10.10.0}"
 : "${HY2_PORT:=443}"
-: "${B_DOMAIN:?B_DOMAIN не задан в config.env}"
+: "${B_DOMAIN:?B_DOMAIN not set in config.env}"
 : "${B_PORT:=443}"
-: "${B_PASS:?B_PASS не задан в config.env}"
+: "${B_PASS:?B_PASS not set in config.env}"
 : "${PROFILE_HOST:=$A_DOMAIN}"
 : "${PROFILE_PORT:=8443}"
 : "${VLESS_PORT:=443}"
-: "${VLESS_DEST:?VLESS_DEST не задан в config.env}"
+: "${VLESS_DEST:?VLESS_DEST not set in config.env}"
 : "${VLESS_SNI:=$VLESS_DEST}"
 : "${VLESS_INTERNAL_PORT_PRIMARY:=20000}"
 : "${AVAILABLE_PROXY_TYPES:=hy2 vless}"
@@ -231,7 +231,7 @@ SRV
   sing-box check -c "$CONFIG" && echo "config OK"
   systemctl enable --now sing-box >/dev/null 2>&1 || true
   systemctl restart sing-box
-  echo "sing-box перезапущен."
+  echo "$(t singbox_restarted)"
 
   # пересобрать все выданные клиентские профили (актуализирует теги/логику у всех разом)
   local rf rkey
@@ -240,7 +240,7 @@ SRV
     rkey=$(basename "$rf" .env)
     gen_profile_quiet "$rkey" >/dev/null 2>&1 || true
   done
-  echo "Клиентские профили пересобраны ($(ls "$CLI"/*.env 2>/dev/null | wc -l) шт.)."
+  printf "$(t client_profiles_rebuilt)\n" "$(ls "$CLI"/*.env 2>/dev/null | wc -l)"
 
   write_nginx_stream
 }
@@ -302,7 +302,7 @@ outbound_json_for() {
   case "$1" in
     hy2) hy2_outbound_json ;;
     vless) vless_outbound_json ;;
-    *) echo "неизвестный proxy type: $1" >&2; return 1 ;;
+    *) printf "$(t unknown_proxy_type)\n" "$1" >&2; return 1 ;;
   esac
 }
 
@@ -447,9 +447,9 @@ json.loads(s)
 open(out,"w").write(s)
 PYEOF
   local modern_ok=1
-  if [[ $? -ne 0 ]]; then echo "  ОШИБКА JSON (modern)"; rm -f "${base}-modern.json"; modern_ok=0
+  if [[ $? -ne 0 ]]; then echo "$(t json_error_modern)"; rm -f "${base}-modern.json"; modern_ok=0
   elif ! sing-box check -c "${base}-modern.json" >/dev/null 2>&1; then
-    echo "  modern не прошёл sing-box check:"
+    echo "$(t modern_check_failed)"
     sing-box check -c "${base}-modern.json" 2>&1 | grep -v WARN | head -4
     rm -f "${base}-modern.json"; modern_ok=0
   fi
@@ -465,10 +465,10 @@ json.loads(s)
 open(out,"w").write(s)
 PYEOF
   local legacy_ok=1
-  if [[ $? -ne 0 ]]; then echo "  ОШИБКА JSON (legacy)"; rm -f "${base}-legacy.json"; legacy_ok=0; fi
+  if [[ $? -ne 0 ]]; then echo "$(t json_error_legacy)"; rm -f "${base}-legacy.json"; legacy_ok=0; fi
 
   if [[ $modern_ok -eq 0 && $legacy_ok -eq 0 ]]; then
-    echo "  Оба варианта не сгенерились, URL не выдан."; return 1
+    echo "$(t both_variants_failed)"; return 1
   fi
 
   if command -v jq >/dev/null 2>&1; then
@@ -478,17 +478,17 @@ PYEOF
   fi
   chmod 644 "${base}-modern.json" "${base}-legacy.json" 2>/dev/null
 
-  echo "  modern: $([[ $modern_ok -eq 1 ]] && echo OK || echo "нет (см. выше)")"
-  echo "  legacy: $([[ $legacy_ok -eq 1 ]] && echo OK || echo "нет")"
+  printf "$(t modern_result)\n" "$([[ $modern_ok -eq 1 ]] && t ok_word || t failed_see_above)"
+  printf "$(t legacy_result)\n" "$([[ $legacy_ok -eq 1 ]] && t ok_word || t no_word)"
 
   local url enc
   url="https://${PROFILE_HOST}:${PROFILE_PORT}/${KEY}_${TOKEN}.json"
   enc=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=''))" "$url")
-  echo "  URL (авто по User-Agent):"
+  echo "$(t url_ua_label)"
   echo "    $url"
-  echo "  link:"
+  echo "$(t link_label)"
   echo "    sing-box://import-remote-profile?url=${enc}#${NAME// /_}"
-  command -v qrencode >/dev/null 2>&1 && { echo "  QR:"; qrencode -t ansiutf8 "sing-box://import-remote-profile?url=${enc}#${NAME// /_}"; }
+  command -v qrencode >/dev/null 2>&1 && { echo "$(t qr_label)"; qrencode -t ansiutf8 "sing-box://import-remote-profile?url=${enc}#${NAME// /_}"; }
 }
 
 gen_profile_quiet() {  # $1 = ключ клиента, только пересобрать файлы, без вывода блоков
@@ -504,13 +504,13 @@ emit_client() {
   NAME=""; PROFILE=""; WG_PRIV=""; WG_PUB=""; IP=""; PASS=""; VLESS_UUID=""; AIPS=""; TOKEN=""
   source "$CLI/$1.env"
   local KEY="$1"
-  echo "=== Клиент: ${NAME}  (profile: ${PROFILE}) ==="
+  printf "$(t client_header)\n" "${NAME}" "${PROFILE}"
   if [[ -n "$WG_PUB" ]]; then
     echo "IP: ${WG_NET}.${IP}"
     local cf; cf=$(gen_wg_conf)
-    echo ".conf (WireGuard app): $cf"
+    printf "$(t wg_conf_label)\n" "$cf"
     echo
-    echo "--- блок WG endpoint (sing-box) ---"
+    echo "$(t block_wg_endpoint)"
     wg_endpoint_json | (jq . 2>/dev/null || cat)
     echo
   fi
@@ -522,26 +522,26 @@ emit_client() {
       mapfile -t vd_all < <(list_vless_domains)
       for vd_line in "${vd_all[@]}"; do
         vd_dom="${vd_line%%:*}"
-        echo "--- блок vless outbound (sing-box) [${vd_dom}] ---"
+        printf "$(t block_vless_outbound_domain)\n" "${vd_dom}"
         vless_outbound_json_for_domain "$vd_dom" | (jq . 2>/dev/null || cat)
         echo
       done
     else
-      echo "--- блок ${pt} outbound (sing-box) ---"
+      printf "$(t block_outbound_generic)\n" "${pt}"
       outbound_json_for "$pt" | (jq . 2>/dev/null || cat)
       echo
     fi
   done
   local ut_preview; ut_preview=$(urltest_json 2>/dev/null) || ut_preview=""
   if [[ -n "$ut_preview" ]]; then
-    echo "--- urltest (auto) ---"
+    echo "$(t block_urltest)"
     echo "$ut_preview" | (jq . 2>/dev/null || cat)
     echo
   fi
-  echo "--- selector ---"
+  echo "$(t block_selector)"
   selector_json | (jq . 2>/dev/null || cat)
   echo
-  echo "URL-профиль sing-box:"
+  echo "$(t profile_url_label)"
   gen_profile
 }
 
@@ -569,20 +569,20 @@ create_client() {
   ensure_base
   local name dev key
   local -a CREATED=()
-  read -rp "Имя владельца (напр. kitty): " name
-  [[ "$name" =~ ^[A-Za-z0-9_]+$ ]] || { echo "имя: латиница/цифры/_"; return; }
+  read -rp "$(t prompt_owner_name)" name
+  [[ "$name" =~ ^[A-Za-z0-9_]+$ ]] || { echo "$(t err_name_format)"; return; }
   while true; do
-    read -rp "Профиль/устройство (напр. phone): " dev
-    [[ "$dev" =~ ^[A-Za-z0-9_]+$ ]] || { echo "профиль: латиница/цифры/_"; continue; }
+    read -rp "$(t prompt_device_name)" dev
+    [[ "$dev" =~ ^[A-Za-z0-9_]+$ ]] || { echo "$(t err_device_format)"; continue; }
     key="${name}_${dev}"
     if [[ -f "$CLI/$key.env" ]]; then
-      echo "$key уже есть"
+      printf "$(t key_already_exists)\n" "$key"
     else
-      echo "Транспорт:"
-      echo "  1) оба (WG + Proxy)"
-      echo "  2) только WG"
-      echo "  3) только Proxy (${AVAILABLE_PROXY_TYPES})"
-      local pr; read -rp "Выбор [1-3, Enter=1]: " pr
+      echo "$(t transport_header)"
+      echo "$(t transport_opt_both)"
+      echo "$(t transport_opt_wg_only)"
+      printf "$(t transport_opt_proxy_only)\n" "${AVAILABLE_PROXY_TYPES}"
+      local pr; read -rp "$(t prompt_choice_13)" pr
       local want_wg=1 want_proxy=1
       case "$pr" in
         2) want_proxy=0 ;;
@@ -593,10 +593,10 @@ create_client() {
       token=$(openssl rand -hex 8)
 
       if [[ $want_wg -eq 1 ]]; then
-        echo "Маршрутизация WG:"; echo "  1) весь трафик"; echo "  2) кроме приватных сетей"
-        read -rp "Выбор [1-2, Enter=1]: " m
+        echo "$(t wg_routing_header)"; echo "$(t wg_routing_full)"; echo "$(t wg_routing_split)"
+        read -rp "$(t prompt_choice_12)" m
         case "$m" in 2) aips="$AIPS_SPLIT";; *) aips="$AIPS_FULL";; esac
-        ip=$(next_wg_ip); [[ "$ip" == "ERR" ]] && { echo "нет IP"; return; }
+        ip=$(next_wg_ip); [[ "$ip" == "ERR" ]] && { echo "$(t no_ip_available)"; return; }
         priv=$(wg genkey); pub=$(echo "$priv" | wg pubkey)
       fi
       local vless_uuid=""
@@ -621,18 +621,18 @@ create_client() {
       if [[ $want_wg -eq 1 && $want_proxy -eq 1 ]]; then proto_label="WG+Proxy(${AVAILABLE_PROXY_TYPES})"
       elif [[ $want_wg -eq 1 ]]; then proto_label="WG"
       else proto_label="Proxy(${AVAILABLE_PROXY_TYPES})"; fi
-      echo "  + устройство $dev создано ($proto_label)."
+      printf "$(t device_created)\n" "$dev" "$proto_label"
       CREATED+=("$key")
     fi
-    read -rp "Добавить ещё устройство этому владельцу? [y/N] " a
+    read -rp "$(t prompt_add_another_device)" a
     [[ "${a,,}" == "y" ]] || break
   done
   rebuild_config
   echo
   if [[ ${#CREATED[@]} -eq 0 ]]; then
-    echo "Новых устройств не создано."
+    echo "$(t no_new_devices)"
   else
-    echo "Готово. Созданные в этом запуске устройства:"
+    echo "$(t created_devices_header)"
     local k
     for k in "${CREATED[@]}"; do echo; emit_client "$k"; done
   fi
@@ -640,62 +640,62 @@ create_client() {
 
 show_client() {
   list_names
-  if [[ ${#NAMES[@]} -eq 0 ]]; then echo "Клиентов нет."; return; fi
-  echo "Владельцы:"
+  if [[ ${#NAMES[@]} -eq 0 ]]; then echo "$(t no_clients)"; return; fi
+  echo "$(t owners_header)"
   local j
   for ((j=0; j<${#NAMES[@]}; j++)); do
     devices_of "${NAMES[$j]}"
-    printf "  %d) %s  (%d устр.)\n" "$((j+1))" "${NAMES[$j]}" "${#DEVS[@]}"
+    printf "$(t owner_line)\n" "$((j+1))" "${NAMES[$j]}" "${#DEVS[@]}"
   done
-  local n; read -rp "Номер владельца: " n
-  [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#NAMES[@]} )) || { echo "неверно"; return; }
+  local n; read -rp "$(t prompt_owner_number)" n
+  [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#NAMES[@]} )) || { echo "$(t invalid)"; return; }
   local owner="${NAMES[$((n-1))]}"
   devices_of "$owner"
-  echo "Устройства '$owner':"
-  for ((j=0; j<${#DEVS[@]}; j++)); do printf "  %d) %s\n" "$((j+1))" "${DEVPROF[$j]}"; done
-  local d; read -rp "Номер устройства (0 — все): " d
-  [[ "$d" =~ ^[0-9]+$ ]] || { echo "неверно"; return; }
+  printf "$(t devices_header)\n" "$owner"
+  for ((j=0; j<${#DEVS[@]}; j++)); do printf "$(t device_line)\n" "$((j+1))" "${DEVPROF[$j]}"; done
+  local d; read -rp "$(t prompt_device_number_all)" d
+  [[ "$d" =~ ^[0-9]+$ ]] || { echo "$(t invalid)"; return; }
   if [[ "$d" == "0" ]]; then
     for ((j=0; j<${#DEVS[@]}; j++)); do echo; emit_client "$(basename "${DEVS[$j]}" .env)"; done
   else
-    (( d>=1 && d<=${#DEVS[@]} )) || { echo "неверно"; return; }
+    (( d>=1 && d<=${#DEVS[@]} )) || { echo "$(t invalid)"; return; }
     echo; emit_client "$(basename "${DEVS[$((d-1))]}" .env)"
   fi
 }
 
 revoke_client() {
   list_names
-  if [[ ${#NAMES[@]} -eq 0 ]]; then echo "Клиентов нет."; return; fi
-  echo "Владельцы:"
+  if [[ ${#NAMES[@]} -eq 0 ]]; then echo "$(t no_clients)"; return; fi
+  echo "$(t owners_header)"
   local j
   for ((j=0; j<${#NAMES[@]}; j++)); do
     devices_of "${NAMES[$j]}"
-    printf "  %d) %s  (%d устр.)\n" "$((j+1))" "${NAMES[$j]}" "${#DEVS[@]}"
+    printf "$(t owner_line)\n" "$((j+1))" "${NAMES[$j]}" "${#DEVS[@]}"
   done
-  local n; read -rp "Номер владельца: " n
-  [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#NAMES[@]} )) || { echo "неверно"; return; }
+  local n; read -rp "$(t prompt_owner_number)" n
+  [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#NAMES[@]} )) || { echo "$(t invalid)"; return; }
   local owner="${NAMES[$((n-1))]}"
   devices_of "$owner"
-  echo "Устройства '$owner':"
-  for ((j=0; j<${#DEVS[@]}; j++)); do printf "  %d) %s\n" "$((j+1))" "${DEVPROF[$j]}"; done
-  echo "  0) ВЕСЬ владелец '$owner' целиком"
-  local d; read -rp "Что отозвать: " d
-  [[ "$d" =~ ^[0-9]+$ ]] || { echo "неверно"; return; }
+  printf "$(t devices_header)\n" "$owner"
+  for ((j=0; j<${#DEVS[@]}; j++)); do printf "$(t device_line)\n" "$((j+1))" "${DEVPROF[$j]}"; done
+  printf "$(t whole_owner_option)\n" "$owner"
+  local d; read -rp "$(t prompt_what_to_revoke)" d
+  [[ "$d" =~ ^[0-9]+$ ]] || { echo "$(t invalid)"; return; }
   if [[ "$d" == "0" ]]; then
-    read -rp "Удалить ВСЕ устройства '$owner'? [y/N] " a
-    [[ "${a,,}" == "y" ]] || { echo "отмена"; return; }
+    read -rp "$(printf "$(t prompt_delete_all_devices)" "$owner")" a
+    [[ "${a,,}" == "y" ]] || { echo "$(t cancelled)"; return; }
     for ((j=0; j<${#DEVS[@]}; j++)); do
       local pr="${DEVPROF[$j]}"
       rm -f "${DEVS[$j]}" "$PROFILES/${owner}_${pr}_"*.json "$CONFDIR/${owner}_${pr}.conf"
     done
-    echo "Владелец '$owner' удалён целиком."
+    printf "$(t owner_deleted)\n" "$owner"
   else
-    (( d>=1 && d<=${#DEVS[@]} )) || { echo "неверно"; return; }
+    (( d>=1 && d<=${#DEVS[@]} )) || { echo "$(t invalid)"; return; }
     local key; key=$(basename "${DEVS[$((d-1))]}" .env)
-    read -rp "Удалить устройство '$key'? [y/N] " a
-    [[ "${a,,}" == "y" ]] || { echo "отмена"; return; }
+    read -rp "$(printf "$(t prompt_delete_device)" "$key")" a
+    [[ "${a,,}" == "y" ]] || { echo "$(t cancelled)"; return; }
     rm -f "$CLI/$key.env" "$PROFILES/${key}_"*.json "$CONFDIR/${key}.conf"
-    echo "Устройство '$key' удалено."
+    printf "$(t device_deleted)\n" "$key"
   fi
   rebuild_config
 }
@@ -707,10 +707,10 @@ fetch_stats_raw() {
 }
 
 traffic_update() {
-  if [[ ! -f "$GRPC_PROTO" ]]; then echo "нет $GRPC_PROTO — статистика недоступна"; return 1; fi
-  if ! command -v grpcurl >/dev/null 2>&1; then echo "grpcurl не установлен"; return 1; fi
+  if [[ ! -f "$GRPC_PROTO" ]]; then printf "$(t stats_proto_missing)\n" "$GRPC_PROTO"; return 1; fi
+  if ! command -v grpcurl >/dev/null 2>&1; then echo "$(t grpcurl_not_installed)"; return 1; fi
   local raw; raw=$(fetch_stats_raw)
-  if [[ -z "$raw" ]]; then echo "не удалось получить статистику (v2ray_api недоступен)"; return 1; fi
+  if [[ -z "$raw" ]]; then echo "$(t stats_fetch_failed)"; return 1; fi
   local rawfile; rawfile=$(mktemp)
   printf '%s' "$raw" > "$rawfile"
   local today; today=$(date +%Y-%m-%d)
@@ -779,11 +779,17 @@ else:
 }
 
 traffic_aggregate() {
-  python3 - "$TRAFFIC_TOTALS" "$TRAFFIC_DAILY" "$1" <<'PYEOF'
+  local lbl_total lbl_total_word lbl_no_traffic lbl_by_client
+  lbl_total=$(t server_total_label)
+  lbl_total_word=$(t total_word)
+  lbl_no_traffic=$(t no_client_traffic)
+  lbl_by_client=$(t by_client_header)
+  python3 - "$TRAFFIC_TOTALS" "$TRAFFIC_DAILY" "$1" "$lbl_total" "$lbl_total_word" "$lbl_no_traffic" "$lbl_by_client" <<'PYEOF'
 import sys, os, glob
 from datetime import date, timedelta
 
 totals_path, daily_dir, mode = sys.argv[1], sys.argv[2], sys.argv[3]
+lbl_total, lbl_total_word, lbl_no_traffic, lbl_by_client = sys.argv[4], sys.argv[5], sys.argv[6], sys.argv[7]
 
 def load_kv(path):
     d = {}
@@ -816,7 +822,7 @@ def human(b):
 
 total_up = data.get("hy2-out:uplink", 0)
 total_dn = data.get("hy2-out:downlink", 0)
-print(f"  СЕРВЕР ВСЕГО (WG+Proxy): \u2191 {human(total_up)}  \u2193 {human(total_dn)}  (\u0432\u0441\u0435\u0433\u043e: {human(total_up+total_dn)})")
+print(f"  {lbl_total}: \u2191 {human(total_up)}  \u2193 {human(total_dn)}  ({lbl_total_word}: {human(total_up+total_dn)})")
 print()
 
 clients = {}
@@ -827,9 +833,9 @@ for k, v in data.items():
     clients.setdefault(key, {"uplink": 0, "downlink": 0})[direction] = v
 
 if not clients:
-    print("  (нет клиентского трафика за этот период)")
+    print(lbl_no_traffic)
 else:
-    print("  По клиентам v2ray:")
+    print(lbl_by_client)
     for key, d in sorted(clients.items(), key=lambda x: -(x[1].get('uplink',0)+x[1].get('downlink',0))):
         up, dn = d.get('uplink',0), d.get('downlink',0)
         if "_" in key:
@@ -837,62 +843,62 @@ else:
             label = f"{owner} / {profile}  [tag: {key}]"
         else:
             label = f"{key}  [tag: {key}]"
-        print(f"    {label}: \u2191 {human(up)}  \u2193 {human(dn)}  (\u0432\u0441\u0435\u0433\u043e: {human(up+dn)})")
+        print(f"    {label}: \u2191 {human(up)}  \u2193 {human(dn)}  ({lbl_total_word}: {human(up+dn)})")
 PYEOF
 }
 
 traffic_menu() {
   traffic_update
-  echo "Период:"
-  echo "  1) сегодня"
-  echo "  2) 7 дней"
-  echo "  3) всего"
-  local c; read -rp "Выбор [1-3]: " c
+  echo "$(t period_header)"
+  echo "$(t period_today)"
+  echo "$(t period_7days)"
+  echo "$(t period_alltime)"
+  local c; read -rp "$(t prompt_choice_13_short)" c
   case "$c" in
-    1) echo "=== За сегодня ==="; traffic_aggregate 1 ;;
-    2) echo "=== За 7 дней ==="; traffic_aggregate 7 ;;
-    3) echo "=== За всё время ==="; traffic_aggregate totals ;;
-    *) echo "неверно" ;;
+    1) echo "$(t period_result_today)"; traffic_aggregate 1 ;;
+    2) echo "$(t period_result_7days)"; traffic_aggregate 7 ;;
+    3) echo "$(t period_result_alltime)"; traffic_aggregate totals ;;
+    *) echo "$(t invalid)" ;;
   esac
 }
 
 service_menu() {
   local LOG=/var/log/nginx/profile_access.log
-  echo "Сервис:"
-  echo "  1) обращения конкретного клиента"
-  echo "  2) статистика modern/legacy"
-  echo "  3) живой мониторинг (tail -f, Ctrl+C для выхода)"
-  echo "  4) пересобрать и перезапустить конфиг"
-  echo "  5) статистика трафика"
-  echo "  6) управление транспортом A -> B"
-  echo "  7) управление Reality-доменами"
-  local c; read -rp "Выбор [1-7]: " c
+  echo "$(t service_header)"
+  echo "$(t svc_opt_client_logs)"
+  echo "$(t svc_opt_version_stats)"
+  echo "$(t svc_opt_live_log)"
+  echo "$(t svc_opt_rebuild)"
+  echo "$(t svc_opt_traffic)"
+  echo "$(t svc_opt_transport)"
+  echo "$(t svc_opt_reality)"
+  local c; read -rp "$(t prompt_choice_17)" c
   case "$c" in
     1)
       list_names
-      if [[ ${#NAMES[@]} -eq 0 ]]; then echo "Клиентов нет."; return; fi
+      if [[ ${#NAMES[@]} -eq 0 ]]; then echo "$(t no_clients)"; return; fi
       local j
       for ((j=0; j<${#NAMES[@]}; j++)); do
         devices_of "${NAMES[$j]}"
-        printf "  %d) %s  (%d устр.)\n" "$((j+1))" "${NAMES[$j]}" "${#DEVS[@]}"
+        printf "$(t owner_line)\n" "$((j+1))" "${NAMES[$j]}" "${#DEVS[@]}"
       done
-      local n; read -rp "Номер владельца: " n
-      [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#NAMES[@]} )) || { echo "неверно"; return; }
+      local n; read -rp "$(t prompt_owner_number)" n
+      [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#NAMES[@]} )) || { echo "$(t invalid)"; return; }
       local owner="${NAMES[$((n-1))]}"
       devices_of "$owner"
-      echo "Устройства '$owner':"
-      for ((j=0; j<${#DEVS[@]}; j++)); do printf "  %d) %s\n" "$((j+1))" "${DEVPROF[$j]}"; done
-      local d; read -rp "Номер устройства: " d
-      [[ "$d" =~ ^[0-9]+$ ]] && (( d>=1 && d<=${#DEVS[@]} )) || { echo "неверно"; return; }
+      printf "$(t devices_header)\n" "$owner"
+      for ((j=0; j<${#DEVS[@]}; j++)); do printf "$(t device_line)\n" "$((j+1))" "${DEVPROF[$j]}"; done
+      local d; read -rp "$(t prompt_device_number)" d
+      [[ "$d" =~ ^[0-9]+$ ]] && (( d>=1 && d<=${#DEVS[@]} )) || { echo "$(t invalid)"; return; }
       local key; key=$(basename "${DEVS[$((d-1))]}" .env)
-      grep "key=${key}_" "$LOG" || echo "Обращений не найдено."
+      grep "key=${key}_" "$LOG" || echo "$(t no_requests_found)"
       ;;
     2)
-      echo "Статистика по версиям (все клиенты):"
+      echo "$(t version_stats_header)"
       grep -o 'variant=[a-z]*' "$LOG" | sort | uniq -c
       ;;
     3)
-      echo "Живой мониторинг (Ctrl+C для выхода):"
+      echo "$(t live_log_header)"
       tail -f "$LOG"
       ;;
     4)
@@ -907,69 +913,69 @@ service_menu() {
     7)
       reality_domains_menu
       ;;
-    *) echo "неверно" ;;
+    *) echo "$(t invalid)" ;;
   esac
 }
 
 reality_domains_menu() {
-  echo "Reality-домены:"
-  echo "  1) показать список"
-  echo "  2) добавить домен"
-  echo "  3) удалить домен"
-  local c; read -rp "Выбор [1-3]: " c
+  echo "$(t reality_domains_header)"
+  echo "$(t rd_opt_list)"
+  echo "$(t rd_opt_add)"
+  echo "$(t rd_opt_remove)"
+  local c; read -rp "$(t prompt_choice_13_short)" c
   case "$c" in
     1)
-      echo "Активные Reality-домены:"
+      echo "$(t active_reality_domains)"
       local vd_line vd_dom vd_port i=1
       local -a vd_all
       mapfile -t vd_all < <(list_vless_domains)
       for vd_line in "${vd_all[@]}"; do
         vd_dom="${vd_line%%:*}"; vd_port="${vd_line##*:}"
         if [[ "$vd_port" == "__primary__" ]]; then
-          printf "  %d) %s  (основной, из config.env)\n" "$i" "$vd_dom"
+          printf "$(t rd_primary_label)\n" "$i" "$vd_dom"
         else
-          printf "  %d) %s  (внутренний порт %s)\n" "$i" "$vd_dom" "$vd_port"
+          printf "$(t rd_internal_port_label)\n" "$i" "$vd_dom" "$vd_port"
         fi
         i=$((i+1))
       done
       ;;
     2)
-      read -rp "Новый домен для Reality (проверь TLS 1.3 заранее): " new_dom
-      [[ -z "$new_dom" ]] && { echo "пусто"; return; }
+      read -rp "$(t prompt_new_reality_domain)" new_dom
+      [[ -z "$new_dom" ]] && { echo "$(t empty_input)"; return; }
       if list_vless_domains | cut -d: -f1 | grep -qx "$new_dom"; then
-        echo "'$new_dom' уже есть в списке"; return
+        printf "$(t domain_already_in_list)\n" "$new_dom"; return
       fi
       local newport; newport=$(next_internal_port)
-      [[ "$newport" == "ERR" ]] && { echo "нет свободных внутренних портов"; return; }
+      [[ "$newport" == "ERR" ]] && { echo "$(t no_free_internal_ports)"; return; }
       echo "${new_dom}:${newport}" >> "$REALITY_DOMAINS_FILE"
-      echo "Домен '$new_dom' добавлен (внутренний порт $newport)."
-      echo "Пересобираю конфиг и профили всех клиентов..."
+      printf "$(t domain_added)\n" "$new_dom" "$newport"
+      echo "$(t rebuilding_config_and_profiles)"
       rebuild_config
       ;;
     3)
       local vd_line vd_dom vd_port i=1
       local -a vd_all vd_removable
       mapfile -t vd_all < <(list_vless_domains)
-      echo "Домены (основной нельзя удалить отсюда):"
+      echo "$(t domains_primary_not_removable)"
       for vd_line in "${vd_all[@]}"; do
         vd_dom="${vd_line%%:*}"; vd_port="${vd_line##*:}"
         [[ "$vd_port" == "__primary__" ]] && continue
-        printf "  %d) %s\n" "$i" "$vd_dom"
+        printf "$(t device_line)\n" "$i" "$vd_dom"
         vd_removable+=("$vd_dom")
         i=$((i+1))
       done
-      if [[ ${#vd_removable[@]} -eq 0 ]]; then echo "Нечего удалять (кроме основного)."; return; fi
-      local n; read -rp "Номер для удаления: " n
-      [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#vd_removable[@]} )) || { echo "неверно"; return; }
+      if [[ ${#vd_removable[@]} -eq 0 ]]; then echo "$(t nothing_to_remove)"; return; fi
+      local n; read -rp "$(t prompt_number_to_remove)" n
+      [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#vd_removable[@]} )) || { echo "$(t invalid)"; return; }
       local target="${vd_removable[$((n-1))]}"
-      read -rp "Удалить домен '$target'? Профили клиентов будут пересобраны. [y/N] " a
-      [[ "${a,,}" == "y" ]] || { echo "отмена"; return; }
+      read -rp "$(printf "$(t prompt_delete_domain)" "$target")" a
+      [[ "${a,,}" == "y" ]] || { echo "$(t cancelled)"; return; }
       grep -v "^${target}:" "$REALITY_DOMAINS_FILE" > "${REALITY_DOMAINS_FILE}.tmp" 2>/dev/null || true
       mv -f "${REALITY_DOMAINS_FILE}.tmp" "$REALITY_DOMAINS_FILE" 2>/dev/null || true
-      echo "Домен '$target' удалён."
+      printf "$(t domain_removed)\n" "$target"
       rebuild_config
       ;;
-    *) echo "неверно" ;;
+    *) echo "$(t invalid)" ;;
   esac
 }
 
@@ -980,53 +986,53 @@ transport_menu() {
 
   source "$BASE"
   local opts=("direct" "hy2-out")
-  local labels=("direct (напрямую, минуя B)" "hy2-out (Hysteria2 к B)")
+  local labels=("$(t transport_label_direct)" "$(t transport_label_hy2)")
   if [[ -n "${B_VLESS_UUID:-}" ]]; then
     opts+=("vless-out-b")
-    labels+=("vless-out-b (VLESS+Reality к B)")
+    labels+=("$(t transport_label_vless)")
   fi
 
-  echo "Транспорт A -> B (сейчас: ${TO_B_DEFAULT}):"
+  printf "$(t transport_ab_header)\n" "${TO_B_DEFAULT}"
   local i
   for ((i=0; i<${#opts[@]}; i++)); do
-    printf "  %d) %s\n" "$((i+1))" "${labels[$i]}"
+    printf "$(t device_line)\n" "$((i+1))" "${labels[$i]}"
   done
-  local n; read -rp "Выбор [1-${#opts[@]}]: " n
-  [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#opts[@]} )) || { echo "неверно"; return; }
+  local n; read -rp "$(printf "$(t prompt_choice_1n)" "${#opts[@]}")" n
+  [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#opts[@]} )) || { echo "$(t invalid)"; return; }
 
   local chosen="${opts[$((n-1))]}"
   printf 'TO_B_DEFAULT="%s"\n' "$chosen" > "$transport_file"
-  echo "Транспорт A -> B переключён на: $chosen"
+  printf "$(t transport_switched)\n" "$chosen"
   rebuild_config
 }
 
 edit_client() {
   ensure_base
   list_names
-  if [[ ${#NAMES[@]} -eq 0 ]]; then echo "Клиентов нет."; return; fi
-  echo "Владельцы:"
+  if [[ ${#NAMES[@]} -eq 0 ]]; then echo "$(t no_clients)"; return; fi
+  echo "$(t owners_header)"
   local j
   for ((j=0; j<${#NAMES[@]}; j++)); do
     devices_of "${NAMES[$j]}"
-    printf "  %d) %s  (%d устр.)\n" "$((j+1))" "${NAMES[$j]}" "${#DEVS[@]}"
+    printf "$(t owner_line)\n" "$((j+1))" "${NAMES[$j]}" "${#DEVS[@]}"
   done
-  local n; read -rp "Номер владельца: " n
-  [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#NAMES[@]} )) || { echo "неверно"; return; }
+  local n; read -rp "$(t prompt_owner_number)" n
+  [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#NAMES[@]} )) || { echo "$(t invalid)"; return; }
   local owner="${NAMES[$((n-1))]}"
   devices_of "$owner"
 
-  echo "Действие для '$owner':"
-  echo "  1) переименовать владельца (все устройства)"
-  echo "  2) переименовать устройство"
-  echo "  3) изменить транспорт устройства"
-  echo "  0) отмена"
-  local act; read -rp "Выбор [0-3]: " act
-  [[ "$act" == "0" ]] && { echo "отмена"; return; }
-  [[ "$act" =~ ^[1-3]$ ]] || { echo "неверно"; return; }
+  printf "$(t action_for_owner)\n" "$owner"
+  echo "$(t edit_opt_rename_owner)"
+  echo "$(t edit_opt_rename_device)"
+  echo "$(t edit_opt_change_transport)"
+  echo "$(t edit_opt_cancel)"
+  local act; read -rp "$(t prompt_choice_03)" act
+  [[ "$act" == "0" ]] && { echo "$(t cancelled)"; return; }
+  [[ "$act" =~ ^[1-3]$ ]] || { echo "$(t invalid)"; return; }
 
   if [[ "$act" == "1" ]]; then
-    read -rp "Новое имя владельца: " new_name
-    [[ "$new_name" =~ ^[A-Za-z0-9_]+$ ]] || { echo "имя: латиница/цифры/_"; return; }
+    read -rp "$(t prompt_new_owner_name)" new_name
+    [[ "$new_name" =~ ^[A-Za-z0-9_]+$ ]] || { echo "$(t err_name_format)"; return; }
     local f dev_name newkey oldkey renamed=0
     for f in "${DEVS[@]}"; do
       NAME=""; PROFILE=""; source "$f"
@@ -1034,7 +1040,7 @@ edit_client() {
       oldkey=$(basename "$f" .env)
       newkey="${new_name}_${dev_name}"
       if [[ -f "$CLI/$newkey.env" && "$newkey" != "$oldkey" ]]; then
-        echo "  пропуск $oldkey: '$newkey' уже существует"
+        printf "$(t skip_already_exists)\n" "$oldkey" "$newkey"
         continue
       fi
       sed -i "s/^NAME=\".*\"/NAME=\"$new_name\"/" "$f"
@@ -1044,15 +1050,15 @@ edit_client() {
       fi
       renamed=$((renamed+1))
     done
-    echo "Переименовано устройств: $renamed"
+    printf "$(t devices_renamed)\n" "$renamed"
     rebuild_config
     return
   fi
 
-  echo "Устройства '$owner':"
-  for ((j=0; j<${#DEVS[@]}; j++)); do printf "  %d) %s\n" "$((j+1))" "${DEVPROF[$j]}"; done
-  local d; read -rp "Номер устройства: " d
-  [[ "$d" =~ ^[0-9]+$ ]] && (( d>=1 && d<=${#DEVS[@]} )) || { echo "неверно"; return; }
+  printf "$(t devices_header)\n" "$owner"
+  for ((j=0; j<${#DEVS[@]}; j++)); do printf "$(t device_line)\n" "$((j+1))" "${DEVPROF[$j]}"; done
+  local d; read -rp "$(t prompt_device_number)" d
+  [[ "$d" =~ ^[0-9]+$ ]] && (( d>=1 && d<=${#DEVS[@]} )) || { echo "$(t invalid)"; return; }
   local oldfile="${DEVS[$((d-1))]}"
   local oldkey; oldkey=$(basename "$oldfile" .env)
 
@@ -1065,23 +1071,23 @@ edit_client() {
   local new_name="$ONAME" new_dev="$OPROFILE"
 
   if [[ "$act" == "2" ]]; then
-    read -rp "Новое имя устройства: " new_dev
-    [[ "$new_dev" =~ ^[A-Za-z0-9_]+$ ]] || { echo "устройство: латиница/цифры/_"; return; }
+    read -rp "$(t prompt_new_device_name)" new_dev
+    [[ "$new_dev" =~ ^[A-Za-z0-9_]+$ ]] || { echo "$(t err_device_format)"; return; }
   elif [[ "$act" == "3" ]]; then
     local cur=""
     [[ -n "$OWG_PUB" ]] && cur+="WG "
     [[ -n "$OPASS" ]] && cur+="hy2 "
     [[ -n "$OVLESS_UUID" ]] && cur+="vless "
-    [[ -z "$cur" ]] && cur="(нет)"
-    echo "Текущий транспорт: $cur"
-    echo "Транспорт:"
-    echo "  1) оба (WG + Proxy)"
-    echo "  2) только WG"
-    echo "  3) только Proxy (${AVAILABLE_PROXY_TYPES})"
-    echo "  0) отмена"
-    local pr; read -rp "Выбор [0-3]: " pr
-    [[ -z "$pr" || "$pr" == "0" ]] && { echo "отмена"; return; }
-    [[ "$pr" =~ ^[1-3]$ ]] || { echo "неверно"; return; }
+    [[ -z "$cur" ]] && cur="$(t none_word)"
+    printf "$(t current_transport)\n" "$cur"
+    echo "$(t transport_header)"
+    echo "$(t transport_opt_both)"
+    echo "$(t transport_opt_wg_only)"
+    printf "$(t transport_opt_proxy_only)\n" "${AVAILABLE_PROXY_TYPES}"
+    echo "$(t edit_opt_cancel)"
+    local pr; read -rp "$(t prompt_choice_03)" pr
+    [[ -z "$pr" || "$pr" == "0" ]] && { echo "$(t cancelled)"; return; }
+    [[ "$pr" =~ ^[1-3]$ ]] || { echo "$(t invalid)"; return; }
     local want_wg=1 want_proxy=1
     case "$pr" in
       2) want_proxy=0 ;;
@@ -1089,10 +1095,10 @@ edit_client() {
     esac
 
     if [[ $want_wg -eq 1 && -z "$OWG_PUB" ]]; then
-      echo "Маршрутизация WG:"; echo "  1) весь трафик"; echo "  2) кроме приватных сетей"
-      local m; read -rp "Выбор [1-2, Enter=1]: " m
+      echo "$(t wg_routing_header)"; echo "$(t wg_routing_full)"; echo "$(t wg_routing_split)"
+      local m; read -rp "$(t prompt_choice_12)" m
       case "$m" in 2) OAIPS="$AIPS_SPLIT";; *) OAIPS="$AIPS_FULL";; esac
-      local newip; newip=$(next_wg_ip); [[ "$newip" == "ERR" ]] && { echo "нет IP"; return; }
+      local newip; newip=$(next_wg_ip); [[ "$newip" == "ERR" ]] && { echo "$(t no_ip_available)"; return; }
       OWG_PRIV=$(wg genkey); OWG_PUB=$(echo "$OWG_PRIV" | wg pubkey); OIP="$newip"
     elif [[ $want_wg -eq 0 ]]; then
       OWG_PRIV=""; OWG_PUB=""; OIP=""; OAIPS=""
@@ -1109,7 +1115,7 @@ edit_client() {
 
   local newkey="${new_name}_${new_dev}"
   if [[ "$newkey" != "$oldkey" && -f "$CLI/$newkey.env" ]]; then
-    echo "'$newkey' уже существует, отмена"; return
+    printf "$(t key_already_exists_cancel)\n" "$newkey"; return
   fi
 
   umask 077
@@ -1135,7 +1141,7 @@ edit_client() {
 
   rebuild_config
   echo
-  echo "Обновлено. Текущее состояние:"
+  echo "$(t updated_current_state)"
   emit_client "$newkey"
 }
 
@@ -1146,21 +1152,21 @@ fi
 
 while true; do
   echo
-  echo "=== VPN manager (A: ${A_DOMAIN} / ${A_IP}) ==="
-  echo "1) создать клиента"
-  echo "2) редактировать клиента"
-  echo "3) отозвать клиента"
-  echo "4) показать клиента"
-  echo "5) сервис"
-  echo "0) выход"
-  read -rp "Выбор [0-5]: " c
+  printf "$(t main_menu_header)\n" "${A_DOMAIN}" "${A_IP}"
+  echo "$(t main_opt_create)"
+  echo "$(t main_opt_edit)"
+  echo "$(t main_opt_revoke)"
+  echo "$(t main_opt_show)"
+  echo "$(t main_opt_service)"
+  echo "$(t main_opt_exit)"
+  read -rp "$(t prompt_choice_05)" c
   case "$c" in
     1) create_client ;;
     2) edit_client ;;
     3) revoke_client ;;
     4) show_client ;;
     5) service_menu ;;
-    0) echo "Пока!"; break ;;
-    *) echo "неизвестный пункт" ;;
+    0) echo "$(t bye)"; break ;;
+    *) echo "$(t unknown_option)" ;;
   esac
 done
