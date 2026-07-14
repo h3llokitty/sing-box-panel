@@ -414,35 +414,41 @@ date > "$DONE_MARKER"
 trap - ERR
 
 step "$(t done_step)"
-echo
-echo "$(t final_notice)"
-echo
-echo "$(t final_firewall_header)"
-echo "$(t final_port_80)"
-printf "$(t final_port_wg)\n" "${WG_PORT}"
-printf "$(t final_port_hy2)\n" "${HY2_PORT}"
-printf "$(t final_port_profile)\n" "${PROFILE_PORT}"
-echo
-echo "$(t final_step2_header)"
-printf "$(t final_step2_body1)\n" "${PROFILE_PORT}"
-echo "$(t final_step2_body2)"
-echo "$(t final_step2_cmd1)"
-echo "$(t final_step2_cmd2)"
-echo
-echo "$(t final_step2_check1)"
-echo "$(t final_step2_check2)"
-echo
-echo "$(t final_management)"
-printf "$(t final_config_label)\n" "$CONFIG_ENV"
+SUMMARY_FILE=/root/install-summary.txt
+{
+  echo
+  echo "$(t final_notice)"
+  echo
+  echo "$(t final_firewall_header)"
+  echo "$(t final_port_80)"
+  printf "$(t final_port_wg)\n" "${WG_PORT}"
+  printf "$(t final_port_hy2)\n" "${HY2_PORT}"
+  printf "$(t final_port_profile)\n" "${PROFILE_PORT}"
+  echo
+  echo "$(t final_step2_header)"
+  printf "$(t final_step2_body1)\n" "${PROFILE_PORT}"
+  echo "$(t final_step2_body2)"
+  echo "$(t final_step2_cmd1)"
+  echo "$(t final_step2_cmd2)"
+  echo
+  echo "$(t final_step2_check1)"
+  echo "$(t final_step2_check2)"
+  echo
+  echo "$(t final_management)"
+  printf "$(t final_config_label)\n" "$CONFIG_ENV"
 
-if [[ -n "${B_INSTALL_PATH:-}" ]]; then
-  echo
-  echo "=================================================="
-  echo "$(t final_b_reminder_header)"
-  echo "=================================================="
-  echo
-  echo "  curl -sL https://${A_DOMAIN}:${PROFILE_PORT}/$(basename "$B_INSTALL_PATH") | sudo bash"
-  echo
-  printf "$(t final_b_reminder_run1)\n" "$B_DOMAIN"
-  printf "$(t final_b_reminder_run2)\n" "$B_PORT"
-fi
+  if [[ -n "${B_INSTALL_PATH:-}" ]]; then
+    echo
+    echo "=================================================="
+    echo "$(t final_b_reminder_header)"
+    echo "=================================================="
+    echo
+    echo "  curl -sL https://${A_DOMAIN}:${PROFILE_PORT}/$(basename "$B_INSTALL_PATH") | sudo bash"
+    echo
+    printf "$(t final_b_reminder_run1)\n" "$B_DOMAIN"
+    printf "$(t final_b_reminder_run2)\n" "$B_PORT"
+  fi
+} | tee "$SUMMARY_FILE"
+
+echo
+printf "$(t summary_saved)\n" "$SUMMARY_FILE"
