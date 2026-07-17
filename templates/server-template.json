@@ -1,0 +1,32 @@
+{
+  "log": { "level": "info", "timestamp": true },
+  "dns": { "servers": [ { "type": "udp", "tag": "dns-direct", "server": "1.1.1.1" } ], "final": "dns-direct" },
+  "inbounds": [
+    { "type": "hysteria2", "tag": "hy2-in", "listen": "::", "listen_port": __HY2_PORT__,
+      "users": [ __USERS__ ],
+      "obfs": { "type": "salamander", "password": "__HY2_OBFS__" },
+      "tls": { "enabled": true, "server_name": "__A_DOMAIN__", "alpn": ["h3"],
+               "acme": { "domain": ["__A_DOMAIN__"], "email": "__ACME_EMAIL__" } } }__VLESS_INBOUND__
+  ],
+  "endpoints": [
+    { "type": "wireguard", "tag": "wg-in", "system": false, "mtu": 1408,
+      "address": ["__WG_NET__.1/24"], "private_key": "__A_PRIV__", "listen_port": __WG_PORT__,
+      "peers": [ __PEERS__ ] }
+  ],
+  "outbounds": [
+    { "type": "direct", "tag": "direct" },
+    { "type": "hysteria2", "tag": "hy2-out", "server": "__B_DOMAIN__", "server_port": __B_PORT__,
+      "password": "__B_PASS__", "tls": { "enabled": true, "server_name": "__B_DOMAIN__", "alpn": ["h3"] } }__B_VLESS_OUTBOUND____B_SELECTOR__
+  ],
+  "route": { "rules": [ { "action": "sniff" }, { "protocol": "dns", "action": "hijack-dns" } ], "final": "__B_FINAL__" },
+  "experimental": {
+    "v2ray_api": {
+      "listen": "127.0.0.1:8080",
+      "stats": {
+        "enabled": true,
+        "outbounds": ["hy2-out"],
+        "users": [ __V2USERS__ ]
+      }
+    }
+  }
+}

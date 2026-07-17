@@ -41,6 +41,7 @@ WGD=$DIR/clients/wg
 HYD=$DIR/clients/hy2
 CONFIG=$DIR/config.json
 TEMPLATE=/opt/vpn/template.json
+SERVER_TEMPLATE=/opt/vpn/server-template.json
 TEMPLATE_LEGACY=/opt/vpn/template-legacy.json
 PROFILES=/opt/vpn/profiles
 CONFDIR=/root/clients
@@ -194,40 +195,41 @@ rebuild_config() {
       \"outbounds\": [ ${b_opts} ],
       \"default\": \"${TO_B_DEFAULT}\" }"
   local b_final="to-b"
-  cat > "$CONFIG" <<SRV
-{
-  "log": { "level": "info", "timestamp": true },
-  "dns": { "servers": [ { "type": "udp", "tag": "dns-direct", "server": "1.1.1.1" } ], "final": "dns-direct" },
-  "inbounds": [
-    { "type": "hysteria2", "tag": "hy2-in", "listen": "::", "listen_port": ${HY2_PORT},
-      "users": [ ${users} ],
-      "obfs": { "type": "salamander", "password": "${HY2_OBFS}" },
-      "tls": { "enabled": true, "server_name": "${A_DOMAIN}", "alpn": ["h3"],
-               "acme": { "domain": ["${A_DOMAIN}"], "email": "${ACME_EMAIL}" } } }${vless_inbound}
-  ],
-  "endpoints": [
-    { "type": "wireguard", "tag": "wg-in", "system": false, "mtu": 1408,
-      "address": ["${WG_NET}.1/24"], "private_key": "${A_PRIV}", "listen_port": ${WG_PORT},
-      "peers": [ ${peers} ] }
-  ],
-  "outbounds": [
-    { "type": "direct", "tag": "direct" },
-    { "type": "hysteria2", "tag": "hy2-out", "server": "${B_DOMAIN}", "server_port": ${B_PORT},
-      "password": "${B_PASS}", "tls": { "enabled": true, "server_name": "${B_DOMAIN}", "alpn": ["h3"] } }${b_vless_outbound}${b_selector}
-  ],
-  "route": { "rules": [ { "action": "sniff" }, { "protocol": "dns", "action": "hijack-dns" } ], "final": "${b_final}" },
-  "experimental": {
-    "v2ray_api": {
-      "listen": "127.0.0.1:8080",
-      "stats": {
-        "enabled": true,
-        "outbounds": ["hy2-out"],
-        "users": [ ${v2users} ]
-      }
-    }
-  }
+
+  python3 - "$SERVER_TEMPLATE" "$CONFIG" \
+    "${HY2_PORT}" "${users}" "${HY2_OBFS}" "${A_DOMAIN}" "${ACME_EMAIL}" "${vless_inbound}" \
+    "${WG_NET}" "${A_PRIV}" "${WG_PORT}" "${peers}" "${B_DOMAIN}" "${B_PORT}" "${B_PASS}" \
+    "${b_vless_outbound}" "${b_selector}" "${b_final}" "${v2users}" <<'PYEOF'
+import sys, json
+tmpl, out = sys.argv[1], sys.argv[2]
+(hy2_port, users, hy2_obfs, a_domain, acme_email, vless_inbound,
+ wg_net, a_priv, wg_port, peers, b_domain, b_port, b_pass,
+ b_vless_outbound, b_selector, b_final, v2users) = sys.argv[3:20]
+s = open(tmpl).read()
+repl = {
+    "__HY2_PORT__": hy2_port,
+    "__USERS__": users,
+    "__HY2_OBFS__": hy2_obfs,
+    "__A_DOMAIN__": a_domain,
+    "__ACME_EMAIL__": acme_email,
+    "__VLESS_INBOUND__": vless_inbound,
+    "__WG_NET__": wg_net,
+    "__A_PRIV__": a_priv,
+    "__WG_PORT__": wg_port,
+    "__PEERS__": peers,
+    "__B_DOMAIN__": b_domain,
+    "__B_PORT__": b_port,
+    "__B_PASS__": b_pass,
+    "__B_VLESS_OUTBOUND__": b_vless_outbound,
+    "__B_SELECTOR__": b_selector,
+    "__B_FINAL__": b_final,
+    "__V2USERS__": v2users,
 }
-SRV
+for k, v in repl.items():
+    s = s.replace(k, v)
+json.loads(s)
+open(out, "w").write(s)
+PYEOF
   sing-box check -c "$CONFIG" && echo "config OK"
   systemctl enable --now sing-box >/dev/null 2>&1 || true
   systemctl restart sing-box
