@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/i18n.sh"
 CONFIG_FILE="${VPN_CONFIG:-$SCRIPT_DIR/config.env}"
 if [[ ! -f "$CONFIG_FILE" ]]; then
-  printf "$(t config_not_found)\n" "$CONFIG_FILE"
+  printf -- "$(t config_not_found)\n" "$CONFIG_FILE"
   echo "$(t config_not_found_hint)"
   exit 1
 fi
@@ -105,7 +105,7 @@ write_nginx_stream() {
   if [[ -f "$cert_path" ]]; then
     nginx -t && systemctl restart nginx
   else
-    printf "$(t cert_not_ready_yet)\n" "${A_DOMAIN}"
+    printf -- "$(t cert_not_ready_yet)\n" "${A_DOMAIN}"
   fi
 }
 
@@ -240,7 +240,7 @@ SRV
     rkey=$(basename "$rf" .env)
     gen_profile_quiet "$rkey" >/dev/null 2>&1 || true
   done
-  printf "$(t client_profiles_rebuilt)\n" "$(ls "$CLI"/*.env 2>/dev/null | wc -l)"
+  printf -- "$(t client_profiles_rebuilt)\n" "$(ls "$CLI"/*.env 2>/dev/null | wc -l)"
 
   write_nginx_stream
 }
@@ -302,7 +302,7 @@ outbound_json_for() {
   case "$1" in
     hy2) hy2_outbound_json ;;
     vless) vless_outbound_json ;;
-    *) printf "$(t unknown_proxy_type)\n" "$1" >&2; return 1 ;;
+    *) printf -- "$(t unknown_proxy_type)\n" "$1" >&2; return 1 ;;
   esac
 }
 
@@ -478,8 +478,8 @@ PYEOF
   fi
   chmod 644 "${base}-modern.json" "${base}-legacy.json" 2>/dev/null
 
-  printf "$(t modern_result)\n" "$([[ $modern_ok -eq 1 ]] && t ok_word || t failed_see_above)"
-  printf "$(t legacy_result)\n" "$([[ $legacy_ok -eq 1 ]] && t ok_word || t no_word)"
+  printf -- "$(t modern_result)\n" "$([[ $modern_ok -eq 1 ]] && t ok_word || t failed_see_above)"
+  printf -- "$(t legacy_result)\n" "$([[ $legacy_ok -eq 1 ]] && t ok_word || t no_word)"
 
   local url enc
   url="https://${PROFILE_HOST}:${PROFILE_PORT}/${KEY}_${TOKEN}.json"
@@ -504,11 +504,11 @@ emit_client() {
   NAME=""; PROFILE=""; WG_PRIV=""; WG_PUB=""; IP=""; PASS=""; VLESS_UUID=""; AIPS=""; TOKEN=""
   source "$CLI/$1.env"
   local KEY="$1"
-  printf "$(t client_header)\n" "${NAME}" "${PROFILE}"
+  printf -- "$(t client_header)\n" "${NAME}" "${PROFILE}"
   if [[ -n "$WG_PUB" ]]; then
     echo "IP: ${WG_NET}.${IP}"
     local cf; cf=$(gen_wg_conf)
-    printf "$(t wg_conf_label)\n" "$cf"
+    printf -- "$(t wg_conf_label)\n" "$cf"
     echo
     echo "$(t block_wg_endpoint)"
     wg_endpoint_json | (jq . 2>/dev/null || cat)
@@ -522,12 +522,12 @@ emit_client() {
       mapfile -t vd_all < <(list_vless_domains)
       for vd_line in "${vd_all[@]}"; do
         vd_dom="${vd_line%%:*}"
-        printf "$(t block_vless_outbound_domain)\n" "${vd_dom}"
+        printf -- "$(t block_vless_outbound_domain)\n" "${vd_dom}"
         vless_outbound_json_for_domain "$vd_dom" | (jq . 2>/dev/null || cat)
         echo
       done
     else
-      printf "$(t block_outbound_generic)\n" "${pt}"
+      printf -- "$(t block_outbound_generic)\n" "${pt}"
       outbound_json_for "$pt" | (jq . 2>/dev/null || cat)
       echo
     fi
@@ -576,12 +576,12 @@ create_client() {
     [[ "$dev" =~ ^[A-Za-z0-9_]+$ ]] || { echo "$(t err_device_format)"; continue; }
     key="${name}_${dev}"
     if [[ -f "$CLI/$key.env" ]]; then
-      printf "$(t key_already_exists)\n" "$key"
+      printf -- "$(t key_already_exists)\n" "$key"
     else
       echo "$(t transport_header)"
       echo "$(t transport_opt_both)"
       echo "$(t transport_opt_wg_only)"
-      printf "$(t transport_opt_proxy_only)\n" "${AVAILABLE_PROXY_TYPES}"
+      printf -- "$(t transport_opt_proxy_only)\n" "${AVAILABLE_PROXY_TYPES}"
       local pr; read -rp "$(t prompt_choice_13)" pr
       local want_wg=1 want_proxy=1
       case "$pr" in
@@ -621,7 +621,7 @@ create_client() {
       if [[ $want_wg -eq 1 && $want_proxy -eq 1 ]]; then proto_label="WG+Proxy(${AVAILABLE_PROXY_TYPES})"
       elif [[ $want_wg -eq 1 ]]; then proto_label="WG"
       else proto_label="Proxy(${AVAILABLE_PROXY_TYPES})"; fi
-      printf "$(t device_created)\n" "$dev" "$proto_label"
+      printf -- "$(t device_created)\n" "$dev" "$proto_label"
       CREATED+=("$key")
     fi
     read -rp "$(t prompt_add_another_device)" a
@@ -645,14 +645,14 @@ show_client() {
   local j
   for ((j=0; j<${#NAMES[@]}; j++)); do
     devices_of "${NAMES[$j]}"
-    printf "$(t owner_line)\n" "$((j+1))" "${NAMES[$j]}" "${#DEVS[@]}"
+    printf -- "$(t owner_line)\n" "$((j+1))" "${NAMES[$j]}" "${#DEVS[@]}"
   done
   local n; read -rp "$(t prompt_owner_number)" n
   [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#NAMES[@]} )) || { echo "$(t invalid)"; return; }
   local owner="${NAMES[$((n-1))]}"
   devices_of "$owner"
-  printf "$(t devices_header)\n" "$owner"
-  for ((j=0; j<${#DEVS[@]}; j++)); do printf "$(t device_line)\n" "$((j+1))" "${DEVPROF[$j]}"; done
+  printf -- "$(t devices_header)\n" "$owner"
+  for ((j=0; j<${#DEVS[@]}; j++)); do printf -- "$(t device_line)\n" "$((j+1))" "${DEVPROF[$j]}"; done
   local d; read -rp "$(t prompt_device_number_all)" d
   [[ "$d" =~ ^[0-9]+$ ]] || { echo "$(t invalid)"; return; }
   if [[ "$d" == "0" ]]; then
@@ -670,32 +670,32 @@ revoke_client() {
   local j
   for ((j=0; j<${#NAMES[@]}; j++)); do
     devices_of "${NAMES[$j]}"
-    printf "$(t owner_line)\n" "$((j+1))" "${NAMES[$j]}" "${#DEVS[@]}"
+    printf -- "$(t owner_line)\n" "$((j+1))" "${NAMES[$j]}" "${#DEVS[@]}"
   done
   local n; read -rp "$(t prompt_owner_number)" n
   [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#NAMES[@]} )) || { echo "$(t invalid)"; return; }
   local owner="${NAMES[$((n-1))]}"
   devices_of "$owner"
-  printf "$(t devices_header)\n" "$owner"
-  for ((j=0; j<${#DEVS[@]}; j++)); do printf "$(t device_line)\n" "$((j+1))" "${DEVPROF[$j]}"; done
-  printf "$(t whole_owner_option)\n" "$owner"
+  printf -- "$(t devices_header)\n" "$owner"
+  for ((j=0; j<${#DEVS[@]}; j++)); do printf -- "$(t device_line)\n" "$((j+1))" "${DEVPROF[$j]}"; done
+  printf -- "$(t whole_owner_option)\n" "$owner"
   local d; read -rp "$(t prompt_what_to_revoke)" d
   [[ "$d" =~ ^[0-9]+$ ]] || { echo "$(t invalid)"; return; }
   if [[ "$d" == "0" ]]; then
-    read -rp "$(printf "$(t prompt_delete_all_devices)" "$owner")" a
+    read -rp "$(printf -- "$(t prompt_delete_all_devices)" "$owner")" a
     [[ "${a,,}" == "y" ]] || { echo "$(t cancelled)"; return; }
     for ((j=0; j<${#DEVS[@]}; j++)); do
       local pr="${DEVPROF[$j]}"
       rm -f "${DEVS[$j]}" "$PROFILES/${owner}_${pr}_"*.json "$CONFDIR/${owner}_${pr}.conf"
     done
-    printf "$(t owner_deleted)\n" "$owner"
+    printf -- "$(t owner_deleted)\n" "$owner"
   else
     (( d>=1 && d<=${#DEVS[@]} )) || { echo "$(t invalid)"; return; }
     local key; key=$(basename "${DEVS[$((d-1))]}" .env)
-    read -rp "$(printf "$(t prompt_delete_device)" "$key")" a
+    read -rp "$(printf -- "$(t prompt_delete_device)" "$key")" a
     [[ "${a,,}" == "y" ]] || { echo "$(t cancelled)"; return; }
     rm -f "$CLI/$key.env" "$PROFILES/${key}_"*.json "$CONFDIR/${key}.conf"
-    printf "$(t device_deleted)\n" "$key"
+    printf -- "$(t device_deleted)\n" "$key"
   fi
   rebuild_config
 }
@@ -707,7 +707,7 @@ fetch_stats_raw() {
 }
 
 traffic_update() {
-  if [[ ! -f "$GRPC_PROTO" ]]; then printf "$(t stats_proto_missing)\n" "$GRPC_PROTO"; return 1; fi
+  if [[ ! -f "$GRPC_PROTO" ]]; then printf -- "$(t stats_proto_missing)\n" "$GRPC_PROTO"; return 1; fi
   if ! command -v grpcurl >/dev/null 2>&1; then echo "$(t grpcurl_not_installed)"; return 1; fi
   local raw; raw=$(fetch_stats_raw)
   if [[ -z "$raw" ]]; then echo "$(t stats_fetch_failed)"; return 1; fi
@@ -880,14 +880,14 @@ service_menu() {
       local j
       for ((j=0; j<${#NAMES[@]}; j++)); do
         devices_of "${NAMES[$j]}"
-        printf "$(t owner_line)\n" "$((j+1))" "${NAMES[$j]}" "${#DEVS[@]}"
+        printf -- "$(t owner_line)\n" "$((j+1))" "${NAMES[$j]}" "${#DEVS[@]}"
       done
       local n; read -rp "$(t prompt_owner_number)" n
       [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#NAMES[@]} )) || { echo "$(t invalid)"; return; }
       local owner="${NAMES[$((n-1))]}"
       devices_of "$owner"
-      printf "$(t devices_header)\n" "$owner"
-      for ((j=0; j<${#DEVS[@]}; j++)); do printf "$(t device_line)\n" "$((j+1))" "${DEVPROF[$j]}"; done
+      printf -- "$(t devices_header)\n" "$owner"
+      for ((j=0; j<${#DEVS[@]}; j++)); do printf -- "$(t device_line)\n" "$((j+1))" "${DEVPROF[$j]}"; done
       local d; read -rp "$(t prompt_device_number)" d
       [[ "$d" =~ ^[0-9]+$ ]] && (( d>=1 && d<=${#DEVS[@]} )) || { echo "$(t invalid)"; return; }
       local key; key=$(basename "${DEVS[$((d-1))]}" .env)
@@ -932,9 +932,9 @@ reality_domains_menu() {
       for vd_line in "${vd_all[@]}"; do
         vd_dom="${vd_line%%:*}"; vd_port="${vd_line##*:}"
         if [[ "$vd_port" == "__primary__" ]]; then
-          printf "$(t rd_primary_label)\n" "$i" "$vd_dom"
+          printf -- "$(t rd_primary_label)\n" "$i" "$vd_dom"
         else
-          printf "$(t rd_internal_port_label)\n" "$i" "$vd_dom" "$vd_port"
+          printf -- "$(t rd_internal_port_label)\n" "$i" "$vd_dom" "$vd_port"
         fi
         i=$((i+1))
       done
@@ -943,12 +943,12 @@ reality_domains_menu() {
       read -rp "$(t prompt_new_reality_domain)" new_dom
       [[ -z "$new_dom" ]] && { echo "$(t empty_input)"; return; }
       if list_vless_domains | cut -d: -f1 | grep -qx "$new_dom"; then
-        printf "$(t domain_already_in_list)\n" "$new_dom"; return
+        printf -- "$(t domain_already_in_list)\n" "$new_dom"; return
       fi
       local newport; newport=$(next_internal_port)
       [[ "$newport" == "ERR" ]] && { echo "$(t no_free_internal_ports)"; return; }
       echo "${new_dom}:${newport}" >> "$REALITY_DOMAINS_FILE"
-      printf "$(t domain_added)\n" "$new_dom" "$newport"
+      printf -- "$(t domain_added)\n" "$new_dom" "$newport"
       echo "$(t rebuilding_config_and_profiles)"
       rebuild_config
       ;;
@@ -960,7 +960,7 @@ reality_domains_menu() {
       for vd_line in "${vd_all[@]}"; do
         vd_dom="${vd_line%%:*}"; vd_port="${vd_line##*:}"
         [[ "$vd_port" == "__primary__" ]] && continue
-        printf "$(t device_line)\n" "$i" "$vd_dom"
+        printf -- "$(t device_line)\n" "$i" "$vd_dom"
         vd_removable+=("$vd_dom")
         i=$((i+1))
       done
@@ -968,11 +968,11 @@ reality_domains_menu() {
       local n; read -rp "$(t prompt_number_to_remove)" n
       [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#vd_removable[@]} )) || { echo "$(t invalid)"; return; }
       local target="${vd_removable[$((n-1))]}"
-      read -rp "$(printf "$(t prompt_delete_domain)" "$target")" a
+      read -rp "$(printf -- "$(t prompt_delete_domain)" "$target")" a
       [[ "${a,,}" == "y" ]] || { echo "$(t cancelled)"; return; }
       grep -v "^${target}:" "$REALITY_DOMAINS_FILE" > "${REALITY_DOMAINS_FILE}.tmp" 2>/dev/null || true
       mv -f "${REALITY_DOMAINS_FILE}.tmp" "$REALITY_DOMAINS_FILE" 2>/dev/null || true
-      printf "$(t domain_removed)\n" "$target"
+      printf -- "$(t domain_removed)\n" "$target"
       rebuild_config
       ;;
     *) echo "$(t invalid)" ;;
@@ -992,17 +992,17 @@ transport_menu() {
     labels+=("$(t transport_label_vless)")
   fi
 
-  printf "$(t transport_ab_header)\n" "${TO_B_DEFAULT}"
+  printf -- "$(t transport_ab_header)\n" "${TO_B_DEFAULT}"
   local i
   for ((i=0; i<${#opts[@]}; i++)); do
-    printf "$(t device_line)\n" "$((i+1))" "${labels[$i]}"
+    printf -- "$(t device_line)\n" "$((i+1))" "${labels[$i]}"
   done
-  local n; read -rp "$(printf "$(t prompt_choice_1n)" "${#opts[@]}")" n
+  local n; read -rp "$(printf -- "$(t prompt_choice_1n)" "${#opts[@]}")" n
   [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#opts[@]} )) || { echo "$(t invalid)"; return; }
 
   local chosen="${opts[$((n-1))]}"
   printf 'TO_B_DEFAULT="%s"\n' "$chosen" > "$transport_file"
-  printf "$(t transport_switched)\n" "$chosen"
+  printf -- "$(t transport_switched)\n" "$chosen"
   rebuild_config
 }
 
@@ -1014,14 +1014,14 @@ edit_client() {
   local j
   for ((j=0; j<${#NAMES[@]}; j++)); do
     devices_of "${NAMES[$j]}"
-    printf "$(t owner_line)\n" "$((j+1))" "${NAMES[$j]}" "${#DEVS[@]}"
+    printf -- "$(t owner_line)\n" "$((j+1))" "${NAMES[$j]}" "${#DEVS[@]}"
   done
   local n; read -rp "$(t prompt_owner_number)" n
   [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#NAMES[@]} )) || { echo "$(t invalid)"; return; }
   local owner="${NAMES[$((n-1))]}"
   devices_of "$owner"
 
-  printf "$(t action_for_owner)\n" "$owner"
+  printf -- "$(t action_for_owner)\n" "$owner"
   echo "$(t edit_opt_rename_owner)"
   echo "$(t edit_opt_rename_device)"
   echo "$(t edit_opt_change_transport)"
@@ -1040,7 +1040,7 @@ edit_client() {
       oldkey=$(basename "$f" .env)
       newkey="${new_name}_${dev_name}"
       if [[ -f "$CLI/$newkey.env" && "$newkey" != "$oldkey" ]]; then
-        printf "$(t skip_already_exists)\n" "$oldkey" "$newkey"
+        printf -- "$(t skip_already_exists)\n" "$oldkey" "$newkey"
         continue
       fi
       sed -i "s/^NAME=\".*\"/NAME=\"$new_name\"/" "$f"
@@ -1050,13 +1050,13 @@ edit_client() {
       fi
       renamed=$((renamed+1))
     done
-    printf "$(t devices_renamed)\n" "$renamed"
+    printf -- "$(t devices_renamed)\n" "$renamed"
     rebuild_config
     return
   fi
 
-  printf "$(t devices_header)\n" "$owner"
-  for ((j=0; j<${#DEVS[@]}; j++)); do printf "$(t device_line)\n" "$((j+1))" "${DEVPROF[$j]}"; done
+  printf -- "$(t devices_header)\n" "$owner"
+  for ((j=0; j<${#DEVS[@]}; j++)); do printf -- "$(t device_line)\n" "$((j+1))" "${DEVPROF[$j]}"; done
   local d; read -rp "$(t prompt_device_number)" d
   [[ "$d" =~ ^[0-9]+$ ]] && (( d>=1 && d<=${#DEVS[@]} )) || { echo "$(t invalid)"; return; }
   local oldfile="${DEVS[$((d-1))]}"
@@ -1079,11 +1079,11 @@ edit_client() {
     [[ -n "$OPASS" ]] && cur+="hy2 "
     [[ -n "$OVLESS_UUID" ]] && cur+="vless "
     [[ -z "$cur" ]] && cur="$(t none_word)"
-    printf "$(t current_transport)\n" "$cur"
+    printf -- "$(t current_transport)\n" "$cur"
     echo "$(t transport_header)"
     echo "$(t transport_opt_both)"
     echo "$(t transport_opt_wg_only)"
-    printf "$(t transport_opt_proxy_only)\n" "${AVAILABLE_PROXY_TYPES}"
+    printf -- "$(t transport_opt_proxy_only)\n" "${AVAILABLE_PROXY_TYPES}"
     echo "$(t edit_opt_cancel)"
     local pr; read -rp "$(t prompt_choice_03)" pr
     [[ -z "$pr" || "$pr" == "0" ]] && { echo "$(t cancelled)"; return; }
@@ -1115,7 +1115,7 @@ edit_client() {
 
   local newkey="${new_name}_${new_dev}"
   if [[ "$newkey" != "$oldkey" && -f "$CLI/$newkey.env" ]]; then
-    printf "$(t key_already_exists_cancel)\n" "$newkey"; return
+    printf -- "$(t key_already_exists_cancel)\n" "$newkey"; return
   fi
 
   umask 077
@@ -1152,7 +1152,7 @@ fi
 
 while true; do
   echo
-  printf "$(t main_menu_header)\n" "${A_DOMAIN}" "${A_IP}"
+  printf -- "$(t main_menu_header)\n" "${A_DOMAIN}" "${A_IP}"
   echo "$(t main_opt_create)"
   echo "$(t main_opt_edit)"
   echo "$(t main_opt_revoke)"
