@@ -174,17 +174,25 @@ if [[ ! -f "$CONFIG_ENV" ]]; then
   else
     read -rp "$(t prompt_b_domain_existing)" B_DOMAIN
     read -rp "$(t prompt_b_port_existing)" B_PORT; B_PORT=${B_PORT:-443}
-    read -rp "$(t prompt_b_pass)" B_PASS
-    read -rp "$(t prompt_b_has_vless)" HAS_B_VLESS
-    if [[ "${HAS_B_VLESS,,}" == "y" ]]; then
-      read -rp "$(t prompt_b_vless_uuid)" B_VLESS_UUID
-      read -rp "$(t prompt_b_reality_pub)" B_REALITY_PUB
-      read -rp "$(t prompt_b_reality_sid)" B_REALITY_SID
-      read -rp "$(t prompt_b_vless_dest_existing)" B_VLESS_DEST
-      B_VLESS_SNI="$B_VLESS_DEST"
-    else
-      B_VLESS_UUID=""; B_REALITY_PUB=""; B_REALITY_SID=""; B_VLESS_DEST=""; B_VLESS_SNI=""
-    fi
+    B_PASS=""; B_VLESS_UUID=""; B_REALITY_PUB=""; B_REALITY_SID=""; B_VLESS_DEST=""; B_VLESS_SNI=""
+    while true; do
+      read -rp "$(t prompt_b_has_hy2)" HAS_B_HY2
+      if [[ "${HAS_B_HY2,,}" != "n" ]]; then
+        read -rp "$(t prompt_b_pass)" B_PASS
+      fi
+      read -rp "$(t prompt_b_has_vless)" HAS_B_VLESS
+      if [[ "${HAS_B_VLESS,,}" == "y" ]]; then
+        read -rp "$(t prompt_b_vless_uuid)" B_VLESS_UUID
+        read -rp "$(t prompt_b_reality_pub)" B_REALITY_PUB
+        read -rp "$(t prompt_b_reality_sid)" B_REALITY_SID
+        read -rp "$(t prompt_b_vless_dest_existing)" B_VLESS_DEST
+        B_VLESS_SNI="$B_VLESS_DEST"
+      fi
+      if [[ -n "$B_PASS" || -n "$B_VLESS_UUID" ]]; then
+        break
+      fi
+      echo "$(t err_no_transport_selected)"
+    done
   fi
   echo
   read -rp "$(t prompt_profile_port)" PROFILE_PORT; PROFILE_PORT=${PROFILE_PORT:-8443}

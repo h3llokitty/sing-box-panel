@@ -681,3 +681,11 @@ T[unknown_proxy_type.ru]="неизвестный proxy type: %s"
 
 T[summary_saved.en]="(This summary has also been saved to %s)"
 T[summary_saved.ru]="(Эта сводка также сохранена в %s)"
+
+# ── existing B transport choice ─────────────────────────────
+
+T[prompt_b_has_hy2.en]="  Does B support Hysteria2? [Y/n] "
+T[prompt_b_has_hy2.ru]="  Поддерживает ли B Hysteria2? [Y/n] "
+
+T[err_no_transport_selected.en]="At least one transport (Hysteria2 or VLESS+Reality) must be selected for B."
+T[err_no_transport_selected.ru]="Нужно выбрать хотя бы один транспорт (Hysteria2 или VLESS+Reality) для B."

@@ -20,7 +20,7 @@ source "$CONFIG_FILE"
 : "${HY2_PORT:=443}"
 : "${B_DOMAIN:?B_DOMAIN not set in config.env}"
 : "${B_PORT:=443}"
-: "${B_PASS:?B_PASS not set in config.env}"
+: "${B_PASS:=}"
 : "${PROFILE_HOST:=$A_DOMAIN}"
 : "${PROFILE_PORT:=8443}"
 : "${VLESS_PORT:=443}"
@@ -172,10 +172,19 @@ rebuild_config() {
           \"short_id\": [\"${REALITY_SID}\"] } } }"
     done
   fi
-  local b_vless_outbound="" b_opts="\"direct\",\"hy2-out\""
+  local b_hy2_outbound="" b_vless_outbound="" b_opts="\"direct\""
+  local v2b_outbounds=""
   local transport_file=/etc/sing-box/transport.env
-  local TO_B_DEFAULT="hy2-out"
+  local TO_B_DEFAULT=""
   [[ -f "$transport_file" ]] && source "$transport_file"
+  if [[ -n "${B_PASS:-}" ]]; then
+    b_hy2_outbound=",
+    { \"type\": \"hysteria2\", \"tag\": \"hy2-out\", \"server\": \"${B_DOMAIN}\", \"server_port\": ${B_PORT},
+      \"password\": \"${B_PASS}\", \"tls\": { \"enabled\": true, \"server_name\": \"${B_DOMAIN}\", \"alpn\": [\"h3\"] } }"
+    b_opts="${b_opts},\"hy2-out\""
+    v2b_outbounds="\"hy2-out\""
+    TO_B_DEFAULT="hy2-out"
+  fi
   if [[ -n "${B_VLESS_UUID:-}" ]]; then
     b_vless_outbound=",
     { \"type\": \"vless\", \"tag\": \"vless-out-b\", \"server\": \"${B_DOMAIN}\", \"server_port\": ${B_PORT},
@@ -184,11 +193,14 @@ rebuild_config() {
         \"utls\": { \"enabled\": true, \"fingerprint\": \"chrome\" },
         \"reality\": { \"enabled\": true, \"public_key\": \"${B_REALITY_PUB}\", \"short_id\": \"${B_REALITY_SID}\" } } }"
     b_opts="${b_opts},\"vless-out-b\""
+    [[ -n "$v2b_outbounds" ]] && v2b_outbounds="${v2b_outbounds},"
+    v2b_outbounds="${v2b_outbounds}\"vless-out-b\""
+    [[ -z "$TO_B_DEFAULT" ]] && TO_B_DEFAULT="vless-out-b"
   fi
-  # default должен быть среди реально доступных outbound'ов, иначе откатываемся на hy2-out
+  [[ -z "$TO_B_DEFAULT" ]] && TO_B_DEFAULT="direct"
   case ",${b_opts}," in
     *"\"${TO_B_DEFAULT}\""*) : ;;
-    *) TO_B_DEFAULT="hy2-out" ;;
+    *) TO_B_DEFAULT="${b_opts##*,}"; TO_B_DEFAULT="${TO_B_DEFAULT//\"/}" ;;
   esac
   local b_selector=",
     { \"type\": \"selector\", \"tag\": \"to-b\",
@@ -199,12 +211,13 @@ rebuild_config() {
   python3 - "$SERVER_TEMPLATE" "$CONFIG" \
     "${HY2_PORT}" "${users}" "${HY2_OBFS}" "${A_DOMAIN}" "${ACME_EMAIL}" "${vless_inbound}" \
     "${WG_NET}" "${A_PRIV}" "${WG_PORT}" "${peers}" "${B_DOMAIN}" "${B_PORT}" "${B_PASS}" \
-    "${b_vless_outbound}" "${b_selector}" "${b_final}" "${v2users}" <<'PYEOF'
+    "${b_vless_outbound}" "${b_selector}" "${b_final}" "${v2users}" "${b_hy2_outbound}" "${v2b_outbounds}" <<'PYEOF'
 import sys, json
 tmpl, out = sys.argv[1], sys.argv[2]
 (hy2_port, users, hy2_obfs, a_domain, acme_email, vless_inbound,
  wg_net, a_priv, wg_port, peers, b_domain, b_port, b_pass,
- b_vless_outbound, b_selector, b_final, v2users) = sys.argv[3:20]
+ b_vless_outbound, b_selector, b_final, v2users,
+ b_hy2_outbound, v2b_outbounds) = sys.argv[3:22]
 s = open(tmpl).read()
 repl = {
     "__HY2_PORT__": hy2_port,
@@ -224,6 +237,8 @@ repl = {
     "__B_SELECTOR__": b_selector,
     "__B_FINAL__": b_final,
     "__V2USERS__": v2users,
+    "__B_HY2_OUTBOUND__": b_hy2_outbound,
+    "__B_STATS_OUTBOUNDS__": v2b_outbounds,
 }
 for k, v in repl.items():
     s = s.replace(k, v)

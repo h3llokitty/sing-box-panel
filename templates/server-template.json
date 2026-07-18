@@ -14,9 +14,7 @@
       "peers": [ __PEERS__ ] }
   ],
   "outbounds": [
-    { "type": "direct", "tag": "direct" },
-    { "type": "hysteria2", "tag": "hy2-out", "server": "__B_DOMAIN__", "server_port": __B_PORT__,
-      "password": "__B_PASS__", "tls": { "enabled": true, "server_name": "__B_DOMAIN__", "alpn": ["h3"] } }__B_VLESS_OUTBOUND____B_SELECTOR__
+    { "type": "direct", "tag": "direct" }__B_HY2_OUTBOUND____B_VLESS_OUTBOUND____B_SELECTOR__
   ],
   "route": { "rules": [ { "action": "sniff" }, { "protocol": "dns", "action": "hijack-dns" } ], "final": "__B_FINAL__" },
   "experimental": {
@@ -24,7 +22,7 @@
       "listen": "127.0.0.1:8080",
       "stats": {
         "enabled": true,
-        "outbounds": ["hy2-out"],
+        "outbounds": [ __B_STATS_OUTBOUNDS__ ],
         "users": [ __V2USERS__ ]
       }
     }
