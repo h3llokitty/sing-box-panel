@@ -54,7 +54,6 @@
             "type": "tun", "tag": "tun-in", "interface_name": "tun0",
             "address": ["172.19.0.1/30"], "mtu": 9000,
             "auto_route": true, "strict_route": true,
-            "sniff": true, "domain_strategy": "prefer_ipv4", "sniff_override_destination": false,
             "endpoint_independent_nat": true
         },
         { "domain_strategy": "prefer_ipv4", "listen": "127.0.0.1", "listen_port": 2334, "sniff": true, "sniff_override_destination": false, "tag": "mixed-in", "type": "mixed" }
