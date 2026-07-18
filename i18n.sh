@@ -689,3 +689,38 @@ T[prompt_b_has_hy2.ru]="  Поддерживает ли B Hysteria2? [Y/n] "
 
 T[err_no_transport_selected.en]="At least one transport (Hysteria2 or VLESS+Reality) must be selected for B."
 T[err_no_transport_selected.ru]="Нужно выбрать хотя бы один транспорт (Hysteria2 или VLESS+Reality) для B."
+
+T[cert_not_ready_yet_install.en]="(TLS certificate not issued yet — nginx will start automatically after the first client is created; see step 2 below)"
+T[cert_not_ready_yet_install.ru]="(TLS-сертификат ещё не выпущен — nginx запустится автоматически после создания первого клиента; см. шаг 2 ниже)"
+
+T[done_step.en]="DONE"
+T[done_step.ru]="ГОТОВО"
+
+# ── step headers (restored) ─────────────────────────────────
+
+T[step1.en]="1/9 — base packages"
+T[step1.ru]="1/9 — базовые пакеты"
+
+T[step2.en]="2/9 — installing Go (required to build sing-box)"
+T[step2.ru]="2/9 — установка Go (требуется для сборки sing-box)"
+
+T[step3.en]="3/9 — building sing-box from source (with_v2ray_api) — this will take a few minutes"
+T[step3.ru]="3/9 — сборка sing-box из исходного кода (with_v2ray_api) — это займёт несколько минут"
+
+T[step4.en]="4/9 — installing grpcurl"
+T[step4.ru]="4/9 — установка grpcurl"
+
+T[step5.en]="5/9 — systemd unit for sing-box"
+T[step5.ru]="5/9 — systemd-юнит для sing-box"
+
+T[step6.en]="6/9 — server parameters"
+T[step6.ru]="6/9 — параметры сервера"
+
+T[step7.en]="7/9 — DNS check"
+T[step7.ru]="7/9 — проверка DNS"
+
+T[step8.en]="8/9 — copying templates and management script"
+T[step8.ru]="8/9 — копирование шаблонов и скрипта управления"
+
+T[step9.en]="9/9 — nginx for profile delivery + cron"
+T[step9.ru]="9/9 — nginx для раздачи профилей и cron"

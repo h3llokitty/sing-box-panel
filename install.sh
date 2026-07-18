@@ -418,7 +418,12 @@ systemctl enable --now nginx-cert-reload.path
 
 # nginx мог быть остановлен на предыдущих шагах (или его конфиг изменился впервые) —
 # reload не поднимает остановленный сервис, поэтому явно restart
-nginx -t && systemctl restart nginx
+CERT_PATH="/var/lib/sing-box/.local/share/certmagic/certificates/acme-v02.api.letsencrypt.org-directory/${A_DOMAIN}/${A_DOMAIN}.crt"
+if [[ -f "$CERT_PATH" ]]; then
+  nginx -t && systemctl restart nginx
+else
+  echo "$(t cert_not_ready_yet_install)"
+fi
 
 (crontab -l 2>/dev/null | grep -v 'cron-traffic' || true; echo "*/15 * * * * /usr/bin/bash /root/vpn-setup.sh --cron-traffic >/dev/null 2>&1") | crontab -
 
