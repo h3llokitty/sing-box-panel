@@ -676,6 +676,9 @@ T[grpcurl_not_installed.ru]="grpcurl не установлен"
 T[stats_fetch_failed.en]="failed to fetch statistics (v2ray_api unavailable)"
 T[stats_fetch_failed.ru]="не удалось получить статистику (v2ray_api недоступен)"
 
+T[stats_update_in_progress.en]="traffic statistics update is already in progress"
+T[stats_update_in_progress.ru]="обновление статистики трафика уже выполняется"
+
 T[unknown_proxy_type.en]="unknown proxy type: %s"
 T[unknown_proxy_type.ru]="неизвестный proxy type: %s"
 

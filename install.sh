@@ -65,7 +65,7 @@ trap 'if [[ -f "$MARKER" ]]; then cleanup_failed_install; fi' ERR
 step "$(t step1)"
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-  curl git build-essential wireguard-tools nginx libnginx-mod-stream jq qrencode python3 openssl dnsutils
+  curl git build-essential wireguard-tools nginx libnginx-mod-stream jq qrencode python3 openssl dnsutils util-linux
 
 step "$(t step2)"
 if ! command -v go >/dev/null 2>&1; then
@@ -425,7 +425,7 @@ else
   echo "$(t cert_not_ready_yet_install)"
 fi
 
-(crontab -l 2>/dev/null | grep -v 'cron-traffic' || true; echo "*/15 * * * * /usr/bin/bash /root/vpn-setup.sh --cron-traffic >/dev/null 2>&1") | crontab -
+(crontab -l 2>/dev/null | grep -v 'cron-traffic' || true; echo "*/15 * * * * /usr/bin/flock -n /run/lock/sb-panel-traffic.lock /root/sb-panel --cron-traffic >/dev/null 2>&1") | crontab -
 
 rm -f "$MARKER"
 date > "$DONE_MARKER"
