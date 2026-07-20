@@ -723,9 +723,15 @@ fetch_stats_raw() {
     127.0.0.1:8080 v2ray.core.app.stats.command.StatsService/QueryStats 2>/dev/null
 }
 
-traffic_update() {
+traffic_update() (
   if [[ ! -f "$GRPC_PROTO" ]]; then printf -- "$(t stats_proto_missing)\n" "$GRPC_PROTO"; return 1; fi
   if ! command -v grpcurl >/dev/null 2>&1; then echo "$(t grpcurl_not_installed)"; return 1; fi
+  local lock_fd
+  exec {lock_fd}>"$TRAFFIC_DIR/update.lock"
+  if ! flock -n "$lock_fd"; then
+    echo "$(t stats_update_in_progress)"
+    return 0
+  fi
   local raw; raw=$(fetch_stats_raw)
   if [[ -z "$raw" ]]; then echo "$(t stats_fetch_failed)"; return 1; fi
   local rawfile; rawfile=$(mktemp)
@@ -780,7 +786,7 @@ with open(daily_path, "w") as f:
 PYEOF
   rm -f "$rawfile"
   echo "$raw" > "$TRAFFIC_DIR/last_raw.json" 2>/dev/null
-}
+)
 
 human_bytes() {
   python3 -c "
