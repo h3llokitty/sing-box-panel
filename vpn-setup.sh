@@ -173,7 +173,8 @@ rebuild_config() {
     done
   fi
   local b_hy2_outbound="" b_vless_outbound="" b_opts="\"direct\""
-  local v2b_outbounds=""
+  # Collect traffic for every possible A→B egress, including direct mode.
+  local v2b_outbounds='"direct"'
   local transport_file=/etc/sing-box/transport.env
   local TO_B_DEFAULT=""
   [[ -f "$transport_file" ]] && source "$transport_file"
@@ -182,7 +183,7 @@ rebuild_config() {
     { \"type\": \"hysteria2\", \"tag\": \"hy2-out\", \"server\": \"${B_DOMAIN}\", \"server_port\": ${B_PORT},
       \"password\": \"${B_PASS}\", \"tls\": { \"enabled\": true, \"server_name\": \"${B_DOMAIN}\", \"alpn\": [\"h3\"] } }"
     b_opts="${b_opts},\"hy2-out\""
-    v2b_outbounds="\"hy2-out\""
+    v2b_outbounds="${v2b_outbounds},\"hy2-out\""
     TO_B_DEFAULT="hy2-out"
   fi
   if [[ -n "${B_VLESS_UUID:-}" ]]; then
@@ -193,8 +194,7 @@ rebuild_config() {
         \"utls\": { \"enabled\": true, \"fingerprint\": \"chrome\" },
         \"reality\": { \"enabled\": true, \"public_key\": \"${B_REALITY_PUB}\", \"short_id\": \"${B_REALITY_SID}\" } } }"
     b_opts="${b_opts},\"vless-out-b\""
-    [[ -n "$v2b_outbounds" ]] && v2b_outbounds="${v2b_outbounds},"
-    v2b_outbounds="${v2b_outbounds}\"vless-out-b\""
+    v2b_outbounds="${v2b_outbounds},\"vless-out-b\""
     [[ -z "$TO_B_DEFAULT" ]] && TO_B_DEFAULT="vless-out-b"
   fi
   [[ -z "$TO_B_DEFAULT" ]] && TO_B_DEFAULT="direct"
@@ -837,16 +837,17 @@ def human(b):
         b /= 1024
     return f"{b:.1f} PB"
 
-total_up = data.get("hy2-out:uplink", 0)
-total_dn = data.get("hy2-out:downlink", 0)
+egress_tags = {"direct", "hy2-out", "vless-out-b"}
+total_up = sum(data.get(f"{tag}:uplink", 0) for tag in egress_tags)
+total_dn = sum(data.get(f"{tag}:downlink", 0) for tag in egress_tags)
 print(f"  {lbl_total}: \u2191 {human(total_up)}  \u2193 {human(total_dn)}  ({lbl_total_word}: {human(total_up+total_dn)})")
 print()
 
 clients = {}
 for k, v in data.items():
-    if k == "hy2-out:uplink" or k == "hy2-out:downlink":
-        continue
     key, direction = k.rsplit(":", 1)
+    if key in egress_tags:
+        continue
     clients.setdefault(key, {"uplink": 0, "downlink": 0})[direction] = v
 
 if not clients:
