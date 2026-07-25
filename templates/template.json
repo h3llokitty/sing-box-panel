@@ -36,6 +36,7 @@
       { "domain": ["github.com","githubusercontent.com","raw.githubusercontent.com"], "server": "dns-local" }
     ],
     "final": "dns-local",
+    "reverse_mapping": true,
     "strategy": "prefer_ipv4"
   },
   "inbounds": [
