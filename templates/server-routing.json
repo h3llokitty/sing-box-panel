@@ -34,11 +34,7 @@
       "outbound": "direct"
     },
     {
-      "rule_set": ["yandex", "kinopoisk"],
-      "outbound": "direct"
-    },
-    {
-      "rule_set": ["geoip-russia"],
+      "rule_set": ["yandex", "kinopoisk", "geoip-russia"],
       "outbound": "direct"
     }
   ]

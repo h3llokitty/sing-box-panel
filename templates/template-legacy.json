@@ -25,8 +25,7 @@
             { "ip_cidr": ["224.0.0.0/3","ff00::/8"], "outbound": "block", "source_ip_cidr": ["224.0.0.0/3","ff00::/8"] },
             { "domain_keyword": ["habr"], "outbound": "Select" },
             { "domain_suffix": ["reddit.com"], "domain_keyword": ["2gis","dgis"], "domain_regex": [".*\\.ru$",".*\\.su$"], "outbound": "direct" },
-            { "rule_set": ["yandex","kinopoisk"], "outbound": "direct" },
-            { "rule_set": ["geoip-russia"], "outbound": "direct" }
+            { "rule_set": ["yandex","kinopoisk","geoip-russia"], "outbound": "direct" }
         ]
     },
     "experimental": {
