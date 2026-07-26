@@ -15,6 +15,13 @@
       "download_detour": "direct"
     },
     {
+      "tag": "geoip-yandex",
+      "type": "remote",
+      "format": "binary",
+      "url": "https://unicorns.kz/sources/geoip/geoip-yandex.srs",
+      "download_detour": "direct"
+    },
+    {
       "tag": "kinopoisk",
       "type": "remote",
       "format": "binary",
@@ -34,7 +41,7 @@
       "outbound": "direct"
     },
     {
-      "rule_set": ["yandex", "kinopoisk", "geoip-russia"],
+      "rule_set": ["yandex", "geoip-yandex", "kinopoisk", "geoip-russia"],
       "outbound": "direct"
     }
   ]
