@@ -35,13 +35,21 @@
       "outbound": "to-b"
     },
     {
+      "domain_keyword": ["yandex", "kinopoisk"],
+      "outbound": "WARP_RU"
+    },
+    {
       "domain_suffix": ["reddit.com"],
       "domain_keyword": ["2gis", "dgis"],
       "domain_regex": [".*\\.ru$", ".*\\.su$"],
       "outbound": "direct"
     },
     {
-      "rule_set": ["yandex", "geoip-yandex", "kinopoisk", "geoip-russia"],
+      "rule_set": ["yandex", "geoip-yandex", "kinopoisk"],
+      "outbound": "WARP_RU"
+    },
+    {
+      "rule_set": ["geoip-russia"],
       "outbound": "direct"
     }
   ]

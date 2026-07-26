@@ -58,6 +58,22 @@ Should return `Protocol: TLSv1.3` and a valid certificate.
 Additional masking domains can be added later through the management menu
 (see below) without touching the original one.
 
+## Optional WARP routing for Yandex and Kinopoisk
+
+Server A can route Yandex and Kinopoisk through a local Cloudflare WARP SOCKS5
+proxy while leaving all other traffic unchanged. Provision WARP separately in
+local proxy mode on `127.0.0.1:40000`, then add these values to
+`/etc/sing-box/vpn-panel.env`:
+
+```bash
+WARP_RU_ENABLED=1
+WARP_RU_PORT=40000
+```
+
+Rebuild the server configuration from the management menu. The generated
+sing-box outbound is tagged `WARP_RU`. WARP registration credentials are local
+server secrets and are never stored in this repository.
+
 ## Management after installation
 
 ```bash
