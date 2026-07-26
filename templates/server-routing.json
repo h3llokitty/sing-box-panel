@@ -6,6 +6,20 @@
       "format": "binary",
       "url": "https://unicorns.kz/sources/geoip/geoip-ru.srs",
       "download_detour": "direct"
+    },
+    {
+      "tag": "yandex",
+      "type": "remote",
+      "format": "binary",
+      "url": "https://unicorns.kz/sources/geosite/yandex.srs",
+      "download_detour": "direct"
+    },
+    {
+      "tag": "kinopoisk",
+      "type": "remote",
+      "format": "binary",
+      "url": "https://unicorns.kz/sources/geosite/kinopoisk.srs",
+      "download_detour": "direct"
     }
   ],
   "rules": [
@@ -17,6 +31,10 @@
       "domain_suffix": ["reddit.com"],
       "domain_keyword": ["2gis", "dgis"],
       "domain_regex": [".*\\.ru$", ".*\\.su$"],
+      "outbound": "direct"
+    },
+    {
+      "rule_set": ["yandex", "kinopoisk"],
       "outbound": "direct"
     },
     {

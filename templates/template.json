@@ -9,7 +9,9 @@
     "default_domain_resolver": "dns-local",
     "final": "Select",
     "rule_set": [
-      { "tag": "geoip-russia", "type": "remote", "format": "binary", "url": "https://unicorns.kz/sources/geoip/geoip-ru.srs", "download_detour": "Select" }
+      { "tag": "geoip-russia", "type": "remote", "format": "binary", "url": "https://unicorns.kz/sources/geoip/geoip-ru.srs", "download_detour": "Select" },
+      { "tag": "yandex", "type": "remote", "format": "binary", "url": "https://unicorns.kz/sources/geosite/yandex.srs", "download_detour": "Select" },
+      { "tag": "kinopoisk", "type": "remote", "format": "binary", "url": "https://unicorns.kz/sources/geosite/kinopoisk.srs", "download_detour": "Select" }
     ],
     "rules": [
       { "action": "sniff", "timeout": "1s" },
@@ -20,6 +22,7 @@
       { "ip_cidr": ["224.0.0.0/3","ff00::/8"], "source_ip_cidr": ["224.0.0.0/3","ff00::/8"], "action": "reject" },
       { "domain_keyword": ["habr"], "outbound": "Select" },
       { "domain_suffix": ["reddit.com"], "domain_keyword": ["2gis","dgis"], "domain_regex": [".*\\.ru$",".*\\.su$"], "outbound": "direct" },
+      { "rule_set": ["yandex","kinopoisk"], "outbound": "direct" },
       { "rule_set": ["geoip-russia"], "outbound": "direct" }
     ]
   },
