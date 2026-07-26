@@ -3,7 +3,8 @@
   "dns": {
     "servers": [ { "type": "udp", "tag": "dns-direct", "server": "1.1.1.1" } ],
     "final": "dns-direct",
-    "reverse_mapping": true
+    "reverse_mapping": true,
+    "strategy": "ipv4_only"
   },
   "inbounds": [
     { "type": "hysteria2", "tag": "hy2-in", "listen": "::", "listen_port": __HY2_PORT__,
