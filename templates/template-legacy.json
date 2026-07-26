@@ -55,7 +55,7 @@
         { "listen": "127.0.0.1", "listen_port": 6450, "override_address": "8.8.8.8", "override_port": 53, "tag": "dns-in", "type": "direct" },
         {
             "type": "tun", "tag": "tun-in", "interface_name": "tun0",
-            "address": ["172.19.0.1/30", "fd42:172:19::1/126"], "mtu": 9000,
+            "address": ["172.19.0.1/30"], "mtu": 9000,
             "auto_route": true, "strict_route": true,
             "endpoint_independent_nat": true
         },
