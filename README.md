@@ -94,4 +94,6 @@ config.env.example      — reference list of parameters (install.sh asks for th
 templates/
 template.json           — client profile for sing-box 1.12+ (modern)
 template-legacy.json     — client profile for sing-box 1.11.x (legacy)
+server-template.json     — technical server configuration template
+server-routing.json      — server route rule sets and policy rules
 stats.proto              — protobuf schema for traffic statistics collection

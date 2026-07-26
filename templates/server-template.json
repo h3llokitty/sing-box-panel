@@ -1,6 +1,10 @@
 {
   "log": { "level": "info", "timestamp": true },
-  "dns": { "servers": [ { "type": "udp", "tag": "dns-direct", "server": "1.1.1.1" } ], "final": "dns-direct" },
+  "dns": {
+    "servers": [ { "type": "udp", "tag": "dns-direct", "server": "1.1.1.1" } ],
+    "final": "dns-direct",
+    "reverse_mapping": true
+  },
   "inbounds": [
     { "type": "hysteria2", "tag": "hy2-in", "listen": "::", "listen_port": __HY2_PORT__,
       "users": [ __USERS__ ],

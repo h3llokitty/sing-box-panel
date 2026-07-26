@@ -1,0 +1,27 @@
+{
+  "rule_set": [
+    {
+      "tag": "geoip-russia",
+      "type": "remote",
+      "format": "binary",
+      "url": "https://unicorns.kz/sources/geoip/geoip-ru.srs",
+      "download_detour": "direct"
+    }
+  ],
+  "rules": [
+    {
+      "domain_keyword": ["habr"],
+      "outbound": "to-b"
+    },
+    {
+      "domain_suffix": ["reddit.com"],
+      "domain_keyword": ["2gis", "dgis"],
+      "domain_regex": [".*\\.ru$", ".*\\.su$"],
+      "outbound": "direct"
+    },
+    {
+      "rule_set": ["geoip-russia"],
+      "outbound": "direct"
+    }
+  ]
+}

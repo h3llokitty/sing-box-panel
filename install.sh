@@ -332,6 +332,7 @@ cp "$SCRIPT_DIR/templates/template.json" /opt/vpn/template.json
 cp "$SCRIPT_DIR/templates/template-legacy.json" /opt/vpn/template-legacy.json
 cp "$SCRIPT_DIR/templates/stats.proto" /opt/vpn/stats.proto
 cp "$SCRIPT_DIR/templates/server-template.json" /opt/vpn/server-template.json
+cp "$SCRIPT_DIR/templates/server-routing.json" /opt/vpn/server-routing.json
 
 # удобные симлинки для навигации из /opt/vpn (не меняют реальные пути в коде)
 ln -sf /etc/sing-box /opt/vpn/sing-box

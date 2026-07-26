@@ -42,6 +42,7 @@ HYD=$DIR/clients/hy2
 CONFIG=$DIR/config.json
 TEMPLATE=/opt/vpn/template.json
 SERVER_TEMPLATE=/opt/vpn/server-template.json
+SERVER_ROUTING=/opt/vpn/server-routing.json
 TEMPLATE_LEGACY=/opt/vpn/template-legacy.json
 PROFILES=/opt/vpn/profiles
 CONFDIR=/root/clients
@@ -208,16 +209,17 @@ rebuild_config() {
       \"default\": \"${TO_B_DEFAULT}\" }"
   local b_final="to-b"
 
-  python3 - "$SERVER_TEMPLATE" "$CONFIG" \
+  local config_new="${CONFIG}.new"
+  python3 - "$SERVER_TEMPLATE" "$SERVER_ROUTING" "$config_new" \
     "${HY2_PORT}" "${users}" "${HY2_OBFS}" "${A_DOMAIN}" "${ACME_EMAIL}" "${vless_inbound}" \
     "${WG_NET}" "${A_PRIV}" "${WG_PORT}" "${peers}" "${B_DOMAIN}" "${B_PORT}" "${B_PASS}" \
     "${b_vless_outbound}" "${b_selector}" "${b_final}" "${v2users}" "${b_hy2_outbound}" "${v2b_outbounds}" <<'PYEOF'
 import sys, json
-tmpl, out = sys.argv[1], sys.argv[2]
+tmpl, routing, out = sys.argv[1:4]
 (hy2_port, users, hy2_obfs, a_domain, acme_email, vless_inbound,
  wg_net, a_priv, wg_port, peers, b_domain, b_port, b_pass,
  b_vless_outbound, b_selector, b_final, v2users,
- b_hy2_outbound, v2b_outbounds) = sys.argv[3:22]
+ b_hy2_outbound, v2b_outbounds) = sys.argv[4:23]
 s = open(tmpl).read()
 repl = {
     "__HY2_PORT__": hy2_port,
@@ -242,10 +244,26 @@ repl = {
 }
 for k, v in repl.items():
     s = s.replace(k, v)
-json.loads(s)
-open(out, "w").write(s)
+config = json.loads(s)
+with open(routing) as routing_file:
+    policy = json.load(routing_file)
+rule_sets = policy.get("rule_set", [])
+rules = policy.get("rules", [])
+if not isinstance(rule_sets, list) or not isinstance(rules, list):
+    raise ValueError("server-routing.json: rule_set and rules must be arrays")
+config["route"]["rule_set"] = rule_sets
+config["route"]["rules"].extend(rules)
+with open(out, "w") as output_file:
+    json.dump(config, output_file, indent=2)
+    output_file.write("\n")
 PYEOF
-  sing-box check -c "$CONFIG" && echo "config OK"
+  if ! sing-box check -c "$config_new"; then
+    rm -f "$config_new"
+    echo "server config check failed; active config was not changed" >&2
+    return 1
+  fi
+  mv -f "$config_new" "$CONFIG"
+  echo "config OK"
   systemctl enable --now sing-box >/dev/null 2>&1 || true
   systemctl restart sing-box
   echo "$(t singbox_restarted)"
