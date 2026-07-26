@@ -177,7 +177,6 @@ rebuild_config() {
   local v2b_outbounds=""
   local transport_file=/etc/sing-box/transport.env
   local TO_B_DEFAULT=""
-  [[ -f "$transport_file" ]] && source "$transport_file"
   if [[ -n "${B_PASS:-}" ]]; then
     b_hy2_outbound=",
     { \"type\": \"hysteria2\", \"tag\": \"hy2-out\", \"server\": \"${B_DOMAIN}\", \"server_port\": ${B_PORT},
@@ -199,6 +198,8 @@ rebuild_config() {
     [[ -z "$TO_B_DEFAULT" ]] && TO_B_DEFAULT="vless-out-b"
   fi
   [[ -z "$TO_B_DEFAULT" ]] && TO_B_DEFAULT="direct"
+  # The persisted user choice must override the automatically selected default.
+  [[ -f "$transport_file" ]] && source "$transport_file"
   case ",${b_opts}," in
     *"\"${TO_B_DEFAULT}\""*) : ;;
     *) TO_B_DEFAULT="${b_opts##*,}"; TO_B_DEFAULT="${TO_B_DEFAULT//\"/}" ;;
