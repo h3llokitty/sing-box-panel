@@ -434,13 +434,13 @@ gen_wg_conf() {
 [Interface]
 PrivateKey = ${WG_PRIV}
 Address = ${WG_NET}.${IP}/24
-DNS = 1.1.1.1
+DNS = ${WG_NET}.1
 MTU = 1280
 
 [Peer]
 PublicKey = ${A_PUB}
 PresharedKey = ${WG_PSK}
-AllowedIPs = ${caips}
+AllowedIPs = ${WG_NET}.0/24, ${caips}
 Endpoint = ${A_IP}:${WG_PORT}
 PersistentKeepalive = 25
 CONF
