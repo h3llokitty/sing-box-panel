@@ -9,10 +9,10 @@
     "default_domain_resolver": "dns-local",
     "final": "Select",
     "rule_set": [
-      { "tag": "geoip-russia", "type": "remote", "format": "binary", "url": "https://unicorns.kz/sources/geoip/geoip-ru.srs", "download_detour": "Select" },
-      { "tag": "yandex", "type": "remote", "format": "binary", "url": "https://unicorns.kz/sources/geosite/yandex.srs", "download_detour": "Select" },
-      { "tag": "geoip-yandex", "type": "remote", "format": "binary", "url": "https://unicorns.kz/sources/geoip/geoip-yandex.srs", "download_detour": "Select" },
-      { "tag": "kinopoisk", "type": "remote", "format": "binary", "url": "https://unicorns.kz/sources/geosite/kinopoisk.srs", "download_detour": "Select" }
+      { "tag": "geoip-russia", "type": "remote", "format": "binary", "url": "https://unicorns.kz/sources/geoip/geoip-ru.srs", "download_detour": "direct" },
+      { "tag": "yandex", "type": "remote", "format": "binary", "url": "https://unicorns.kz/sources/geosite/yandex.srs", "download_detour": "direct" },
+      { "tag": "geoip-yandex", "type": "remote", "format": "binary", "url": "https://unicorns.kz/sources/geoip/geoip-yandex.srs", "download_detour": "direct" },
+      { "tag": "kinopoisk", "type": "remote", "format": "binary", "url": "https://unicorns.kz/sources/geosite/kinopoisk.srs", "download_detour": "direct" }
     ],
     "rules": [
       { "action": "sniff", "timeout": "1s" },
