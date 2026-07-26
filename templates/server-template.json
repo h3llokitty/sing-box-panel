@@ -14,7 +14,7 @@
   ],
   "endpoints": [
     { "type": "wireguard", "tag": "wg-in", "system": false, "mtu": 1408,
-      "address": ["__WG_NET__.1/24"], "private_key": "__A_PRIV__", "listen_port": __WG_PORT__,
+      "address": ["__WG_NET__.1/24", "__WG_NET6__1/64"], "private_key": "__A_PRIV__", "listen_port": __WG_PORT__,
       "peers": [ __PEERS__ ] }
   ],
   "outbounds": [

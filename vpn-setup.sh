@@ -17,6 +17,7 @@ source "$CONFIG_FILE"
 : "${ACME_EMAIL:?ACME_EMAIL not set in config.env}"
 : "${WG_PORT:=51820}"
 : "${WG_NET:=10.10.0}"
+: "${WG_NET6:=fd42:10:10::}"
 : "${HY2_PORT:=443}"
 : "${B_DOMAIN:?B_DOMAIN not set in config.env}"
 : "${B_PORT:=443}"
@@ -30,7 +31,7 @@ source "$CONFIG_FILE"
 : "${AVAILABLE_PROXY_TYPES:=hy2 vless}"
 ### ─────────────────────────────────────────────────────────
 
-AIPS_SPLIT='"0.0.0.0/5","8.0.0.0/7","11.0.0.0/8","12.0.0.0/6","16.0.0.0/4","32.0.0.0/3","64.0.0.0/2","128.0.0.0/3","160.0.0.0/5","168.0.0.0/6","172.0.0.0/12","172.32.0.0/11","172.64.0.0/10","172.128.0.0/9","173.0.0.0/8","174.0.0.0/7","176.0.0.0/4","192.0.0.0/9","192.128.0.0/11","192.160.0.0/13","192.169.0.0/16","192.170.0.0/15","192.172.0.0/14","192.176.0.0/12","192.192.0.0/10","193.0.0.0/8","194.0.0.0/7","196.0.0.0/6","200.0.0.0/5","208.0.0.0/4","::/0"'
+AIPS_SPLIT='"0.0.0.0/5","8.0.0.0/7","11.0.0.0/8","12.0.0.0/6","16.0.0.0/4","32.0.0.0/3","64.0.0.0/2","128.0.0.0/3","160.0.0.0/5","168.0.0.0/6","172.0.0.0/12","172.32.0.0/11","172.64.0.0/10","172.128.0.0/9","173.0.0.0/8","174.0.0.0/7","176.0.0.0/4","192.0.0.0/9","192.128.0.0/11","192.160.0.0/13","192.169.0.0/16","192.170.0.0/15","192.172.0.0/14","192.176.0.0/12","192.192.0.0/10","193.0.0.0/8","194.0.0.0/7","196.0.0.0/6","200.0.0.0/5","208.0.0.0/4","2000::/3"'
 AIPS_FULL='"0.0.0.0/0","::/0"'
 
 DIR=/etc/sing-box
@@ -141,7 +142,7 @@ rebuild_config() {
     keyname=$(basename "$f" .env)
     if [[ -n "$WG_PUB" ]]; then
       [[ $pf -eq 0 ]] && peers+=","
-      peers+="{ \"public_key\": \"$WG_PUB\", \"pre_shared_key\": \"$WG_PSK\", \"allowed_ips\": [\"${WG_NET}.${IP}/32\"] }"; pf=0
+      peers+="{ \"public_key\": \"$WG_PUB\", \"pre_shared_key\": \"$WG_PSK\", \"allowed_ips\": [\"${WG_NET}.${IP}/32\", \"${WG_NET6}${IP}/128\"] }"; pf=0
     fi
     if [[ -n "$PASS" ]]; then
       [[ $uf -eq 0 ]] && users+=","
@@ -213,14 +214,14 @@ rebuild_config() {
   local config_new="${CONFIG}.new"
   python3 - "$SERVER_TEMPLATE" "$SERVER_ROUTING" "$config_new" \
     "${HY2_PORT}" "${users}" "${HY2_OBFS}" "${A_DOMAIN}" "${ACME_EMAIL}" "${vless_inbound}" \
-    "${WG_NET}" "${A_PRIV}" "${WG_PORT}" "${peers}" "${B_DOMAIN}" "${B_PORT}" "${B_PASS}" \
+    "${WG_NET}" "${WG_NET6}" "${A_PRIV}" "${WG_PORT}" "${peers}" "${B_DOMAIN}" "${B_PORT}" "${B_PASS}" \
     "${b_vless_outbound}" "${b_selector}" "${b_final}" "${v2users}" "${b_hy2_outbound}" "${v2b_outbounds}" <<'PYEOF'
 import sys, json
 tmpl, routing, out = sys.argv[1:4]
 (hy2_port, users, hy2_obfs, a_domain, acme_email, vless_inbound,
- wg_net, a_priv, wg_port, peers, b_domain, b_port, b_pass,
+ wg_net, wg_net6, a_priv, wg_port, peers, b_domain, b_port, b_pass,
  b_vless_outbound, b_selector, b_final, v2users,
- b_hy2_outbound, v2b_outbounds) = sys.argv[4:23]
+ b_hy2_outbound, v2b_outbounds) = sys.argv[4:24]
 s = open(tmpl).read()
 repl = {
     "__HY2_PORT__": hy2_port,
@@ -230,6 +231,7 @@ repl = {
     "__ACME_EMAIL__": acme_email,
     "__VLESS_INBOUND__": vless_inbound,
     "__WG_NET__": wg_net,
+    "__WG_NET6__": wg_net6,
     "__A_PRIV__": a_priv,
     "__WG_PORT__": wg_port,
     "__PEERS__": peers,
@@ -285,7 +287,7 @@ wg_endpoint_json() {
   [[ -z "${AIPS:-}" ]] && AIPS="$AIPS_FULL"
   cat <<WG
 { "type": "wireguard", "tag": "${A_DOMAIN}_${PROFILE}_wg", "system": false, "mtu": 1280,
-  "address": ["${WG_NET}.${IP}/24"], "private_key": "${WG_PRIV}",
+  "address": ["${WG_NET}.${IP}/24", "${WG_NET6}${IP}/64"], "private_key": "${WG_PRIV}",
   "peers": [ { "address": "${A_IP}", "port": ${WG_PORT}, "public_key": "${A_PUB}",
     "pre_shared_key": "${WG_PSK}", "allowed_ips": [${AIPS}], "persistent_keepalive_interval": 25 } ] }
 WG
@@ -434,14 +436,14 @@ gen_wg_conf() {
   cat > "$path" <<CONF
 [Interface]
 PrivateKey = ${WG_PRIV}
-Address = ${WG_NET}.${IP}/24
+Address = ${WG_NET}.${IP}/24, ${WG_NET6}${IP}/64
 DNS = ${WG_NET}.1
 MTU = 1280
 
 [Peer]
 PublicKey = ${A_PUB}
 PresharedKey = ${WG_PSK}
-AllowedIPs = ${WG_NET}.0/24, ${caips}
+AllowedIPs = ${WG_NET}.0/24, ${WG_NET6}/64, ${caips}
 Endpoint = ${A_IP}:${WG_PORT}
 PersistentKeepalive = 25
 CONF
