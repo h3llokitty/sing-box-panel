@@ -241,6 +241,12 @@ T[final_b_reminder_run1.ru]="Выполните это на самом серв�
 T[final_b_reminder_run2.en]="and opening ports %s TCP+UDP, 80 TCP on it)."
 T[final_b_reminder_run2.ru]="и открытия портов %s TCP+UDP, 80 TCP на нём)."
 
+T[final_warp_header.en]="Optional: install Cloudflare WARP on server A:"
+T[final_warp_header.ru]="Опционально: установите Cloudflare WARP на сервер A:"
+
+T[final_warp_note.en]="The script asks for the sing-box outbound tag, verifies WARP IPv4, and rebuilds the server config."
+T[final_warp_note.ru]="Скрипт спросит tag аутбаунда sing-box, проверит WARP IPv4 и пересоберёт конфигурацию сервера."
+
 # ── write_nginx_stream ──────────────────────────────────────
 
 T[cert_not_ready_yet.en]="Certificate for %s has not been issued by ACME yet — nginx will restart automatically once it appears (see nginx-cert-reload.path)."

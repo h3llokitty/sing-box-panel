@@ -225,6 +225,7 @@ VLESS_SNI="$VLESS_SNI"
 AVAILABLE_PROXY_TYPES="hy2 vless"
 WARP_RU_ENABLED=0
 WARP_RU_PORT=40000
+WARP_RU_TAG="WARP"
 LANG_CODE="$LANG_CODE"
 EOF
   chmod 600 "$CONFIG_ENV"
@@ -342,6 +343,125 @@ ln -sf /etc/nginx /opt/vpn/nginx
 cp "$SCRIPT_DIR/vpn-setup.sh" /root/vpn-setup.sh
 cp "$SCRIPT_DIR/i18n.sh" /root/i18n.sh
 chmod +x /root/vpn-setup.sh
+
+WARP_TOKEN=$(openssl rand -hex 8)
+WARP_INSTALL_PATH="/opt/vpn/profiles/install-warp-${WARP_TOKEN}.sh"
+cat > "$WARP_INSTALL_PATH" <<'WARPEOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $EUID -ne 0 ]]; then
+  echo "Run this script as root." >&2
+  exit 1
+fi
+
+CONFIG_ENV=/etc/sing-box/vpn-panel.env
+if [[ ! -f "$CONFIG_ENV" || ! -x /root/vpn-setup.sh ]]; then
+  echo "sing-box-panel is not installed on this server." >&2
+  exit 1
+fi
+
+read -rp "sing-box outbound tag [WARP]: " WARP_TAG
+WARP_TAG=${WARP_TAG:-WARP}
+if [[ ! "$WARP_TAG" =~ ^[A-Za-z0-9_-]+$ ]]; then
+  echo "Invalid tag. Use only letters, digits, _ and -." >&2
+  exit 1
+fi
+read -rp "Local WARP SOCKS5 port [40000]: " WARP_PORT
+WARP_PORT=${WARP_PORT:-40000}
+if [[ ! "$WARP_PORT" =~ ^[0-9]+$ ]] || (( WARP_PORT < 1024 || WARP_PORT > 65535 )); then
+  echo "Invalid port." >&2
+  exit 1
+fi
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq
+apt-get install -y -qq --no-install-recommends curl ca-certificates gnupg lsb-release
+install -d -m 0755 /usr/share/keyrings
+curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg |
+  gpg --dearmor --yes -o /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+printf 'deb [arch=%s signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ %s main\n' \
+  "$(dpkg --print-architecture)" "$(lsb_release -cs)" \
+  > /etc/apt/sources.list.d/cloudflare-client.list
+apt-get update -qq
+apt-get install -y -qq cloudflare-warp
+systemctl enable --now warp-svc
+
+if ! warp-cli --accept-tos registration show >/dev/null 2>&1; then
+  if ! warp-cli --accept-tos registration new; then
+    echo
+    echo "Cloudflare registration API is unavailable from this server."
+    echo "Register through an external connection, then run this script again."
+    exit 1
+  fi
+fi
+
+warp-cli --accept-tos proxy port "$WARP_PORT"
+warp-cli --accept-tos mode proxy
+warp-cli --accept-tos connect
+
+connected=0
+for _ in $(seq 1 15); do
+  if warp-cli --accept-tos status 2>/dev/null | grep -q 'Connected'; then
+    connected=1
+    break
+  fi
+  sleep 2
+done
+if [[ $connected -ne 1 ]]; then
+  echo "WARP did not connect." >&2
+  warp-cli --accept-tos status || true
+  exit 1
+fi
+
+if ! ss -lnt | grep -q "127.0.0.1:${WARP_PORT}"; then
+  echo "WARP SOCKS5 listener did not appear on 127.0.0.1:${WARP_PORT}." >&2
+  exit 1
+fi
+TRACE=$(curl -4 --socks5 "127.0.0.1:${WARP_PORT}" --connect-timeout 10 --max-time 25 \
+  https://www.cloudflare.com/cdn-cgi/trace)
+grep -qx 'warp=on' <<<"$TRACE" || {
+  echo "WARP health check failed: warp=on was not returned." >&2
+  exit 1
+}
+WARP_IP=$(awk -F= '$1 == "ip" { print $2 }' <<<"$TRACE")
+[[ "$WARP_IP" == *.* ]] || {
+  echo "WARP health check did not return an IPv4 address." >&2
+  exit 1
+}
+
+ENV_BACKUP="${CONFIG_ENV}.before-warp.$(date +%Y%m%d%H%M%S)"
+cp -a "$CONFIG_ENV" "$ENV_BACKUP"
+sed -i \
+  -e '/^WARP_RU_ENABLED=/d' \
+  -e '/^WARP_RU_PORT=/d' \
+  -e '/^WARP_RU_TAG=/d' \
+  "$CONFIG_ENV"
+printf '\nWARP_RU_ENABLED=1\nWARP_RU_PORT=%s\nWARP_RU_TAG="%s"\n' \
+  "$WARP_PORT" "$WARP_TAG" >> "$CONFIG_ENV"
+
+install -d -m 0755 /etc/systemd/system/sing-box.service.d
+cat > /etc/systemd/system/sing-box.service.d/warp.conf <<'UNIT'
+[Unit]
+Wants=warp-svc.service
+After=warp-svc.service
+UNIT
+systemctl daemon-reload
+
+if ! VPN_CONFIG="$CONFIG_ENV" /root/vpn-setup.sh --rebuild-config; then
+  cp -a "$ENV_BACKUP" "$CONFIG_ENV"
+  echo "sing-box rebuild failed; vpn-panel.env was restored from $ENV_BACKUP" >&2
+  exit 1
+fi
+
+echo
+echo "WARP is ready."
+echo "  outbound tag: $WARP_TAG"
+echo "  SOCKS5:       127.0.0.1:$WARP_PORT"
+echo "  WARP IPv4:    $WARP_IP"
+echo "  env backup:   $ENV_BACKUP"
+WARPEOF
+chmod 700 "$WARP_INSTALL_PATH"
 
 cat > /root/sb-panel <<EOF
 #!/usr/bin/env bash
@@ -469,6 +589,16 @@ SUMMARY_FILE=/root/install-summary.txt
     printf "$(t final_b_reminder_run1)\n" "$B_DOMAIN"
     printf "$(t final_b_reminder_run2)\n" "$B_PORT"
   fi
+
+  echo
+  echo "=================================================="
+  echo "$(t final_warp_header)"
+  echo "=================================================="
+  echo
+  echo "  curl -fsSL https://${A_DOMAIN}:${PROFILE_PORT}/$(basename "$WARP_INSTALL_PATH") -o /tmp/install-warp.sh"
+  echo "  sudo bash /tmp/install-warp.sh"
+  echo
+  echo "$(t final_warp_note)"
 } | tee "$SUMMARY_FILE"
 
 echo

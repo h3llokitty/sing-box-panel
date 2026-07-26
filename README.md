@@ -68,11 +68,15 @@ local proxy mode on `127.0.0.1:40000`, then add these values to
 ```bash
 WARP_RU_ENABLED=1
 WARP_RU_PORT=40000
+WARP_RU_TAG="WARP"
 ```
 
 Rebuild the server configuration from the management menu. The generated
-sing-box outbound is tagged `WARP_RU`. WARP registration credentials are local
-server secrets and are never stored in this repository.
+sing-box outbound uses the configured tag. A tokenized WARP installer link is
+printed at the end of the main installation; the script asks for the tag,
+installs and verifies WARP, saves these settings, and rebuilds sing-box. WARP
+registration credentials are local server secrets and are never stored in this
+repository.
 
 ## Management after installation
 

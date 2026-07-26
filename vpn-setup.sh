@@ -30,6 +30,7 @@ source "$CONFIG_FILE"
 : "${AVAILABLE_PROXY_TYPES:=hy2 vless}"
 : "${WARP_RU_ENABLED:=0}"
 : "${WARP_RU_PORT:=40000}"
+: "${WARP_RU_TAG:=WARP}"
 ### ─────────────────────────────────────────────────────────
 
 AIPS_SPLIT='"0.0.0.0/5","8.0.0.0/7","11.0.0.0/8","12.0.0.0/6","16.0.0.0/4","32.0.0.0/3","64.0.0.0/2","128.0.0.0/3","160.0.0.0/5","168.0.0.0/6","172.0.0.0/12","172.32.0.0/11","172.64.0.0/10","172.128.0.0/9","173.0.0.0/8","174.0.0.0/7","176.0.0.0/4","192.0.0.0/9","192.128.0.0/11","192.160.0.0/13","192.169.0.0/16","192.170.0.0/15","192.172.0.0/14","192.176.0.0/12","192.192.0.0/10","193.0.0.0/8","194.0.0.0/7","196.0.0.0/6","200.0.0.0/5","208.0.0.0/4","::/0"'
@@ -177,8 +178,12 @@ rebuild_config() {
   fi
   local warp_ru_outbound="" b_hy2_outbound="" b_vless_outbound="" b_opts="\"direct\""
   if [[ "$WARP_RU_ENABLED" == "1" ]]; then
+    [[ "$WARP_RU_TAG" =~ ^[A-Za-z0-9_-]+$ ]] || {
+      echo "invalid WARP_RU_TAG: use only letters, digits, _ and -" >&2
+      return 1
+    }
     warp_ru_outbound=",
-    { \"type\": \"socks\", \"tag\": \"WARP_RU\", \"server\": \"127.0.0.1\",
+    { \"type\": \"socks\", \"tag\": \"${WARP_RU_TAG}\", \"server\": \"127.0.0.1\",
       \"server_port\": ${WARP_RU_PORT}, \"version\": \"5\" }"
   fi
   local v2b_outbounds=""
@@ -222,14 +227,14 @@ rebuild_config() {
     "${HY2_PORT}" "${users}" "${HY2_OBFS}" "${A_DOMAIN}" "${ACME_EMAIL}" "${vless_inbound}" \
     "${WG_NET}" "${A_PRIV}" "${WG_PORT}" "${peers}" "${B_DOMAIN}" "${B_PORT}" "${B_PASS}" \
     "${b_vless_outbound}" "${b_selector}" "${b_final}" "${v2users}" "${b_hy2_outbound}" "${v2b_outbounds}" \
-    "${warp_ru_outbound}" "${WARP_RU_ENABLED}" <<'PYEOF'
+    "${warp_ru_outbound}" "${WARP_RU_ENABLED}" "${WARP_RU_TAG}" <<'PYEOF'
 import sys, json
 tmpl, routing, out = sys.argv[1:4]
 (hy2_port, users, hy2_obfs, a_domain, acme_email, vless_inbound,
  wg_net, a_priv, wg_port, peers, b_domain, b_port, b_pass,
  b_vless_outbound, b_selector, b_final, v2users,
  b_hy2_outbound, v2b_outbounds, warp_ru_outbound,
- warp_ru_enabled) = sys.argv[4:25]
+ warp_ru_enabled, warp_ru_tag) = sys.argv[4:26]
 s = open(tmpl).read()
 repl = {
     "__HY2_PORT__": hy2_port,
@@ -262,9 +267,11 @@ rule_sets = policy.get("rule_set", [])
 rules = policy.get("rules", [])
 if not isinstance(rule_sets, list) or not isinstance(rules, list):
     raise ValueError("server-routing.json: rule_set and rules must be arrays")
-if warp_ru_enabled != "1":
-    for rule in rules:
-        if rule.get("outbound") == "WARP_RU":
+for rule in rules:
+    if rule.get("outbound") == "WARP_RU":
+        if warp_ru_enabled == "1":
+            rule["outbound"] = warp_ru_tag
+        else:
             rule["outbound"] = "direct"
 config["route"]["rule_set"] = rule_sets
 config["route"]["rules"].extend(rules)
@@ -280,7 +287,7 @@ PYEOF
   mv -f "$config_new" "$CONFIG"
   echo "config OK"
   systemctl enable --now sing-box >/dev/null 2>&1 || true
-  systemctl restart sing-box
+  systemctl restart --no-block sing-box
   echo "$(t singbox_restarted)"
 
   # пересобрать все выданные клиентские профили (актуализирует теги/логику у всех разом)
@@ -1197,6 +1204,10 @@ edit_client() {
 
 if [[ "${1:-}" == "--cron-traffic" ]]; then
   traffic_update
+  exit 0
+fi
+if [[ "${1:-}" == "--rebuild-config" ]]; then
+  rebuild_config
   exit 0
 fi
 
