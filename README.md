@@ -58,25 +58,29 @@ Should return `Protocol: TLSv1.3` and a valid certificate.
 Additional masking domains can be added later through the management menu
 (see below) without touching the original one.
 
-## Optional WARP routing for Yandex and Kinopoisk
+## Updating an existing installation
 
-Server A can route Yandex and Kinopoisk through a local Cloudflare WARP SOCKS5
-proxy while leaving all other traffic unchanged. Provision WARP separately in
-local proxy mode on `127.0.0.1:40000`, then add these values to
-`/etc/sing-box/vpn-panel.env`:
+When install.sh detects /etc/sing-box/.install-done, it does not run cleanup.
+It offers an in-place Git update, a separately confirmed full reinstall, or cancel.
+During an in-place update, an existing /opt/vpn/server-routing.json can be
+kept (the default) or replaced explicitly with the standard file from Git.
+Every update creates a rollback backup under /root/vpn-update-backup-*.
 
-```bash
-WARP_RU_ENABLED=1
-WARP_RU_PORT=40000
-WARP_RU_TAG="WARP"
-```
+## Optional Cloudflare WARP outbound
 
-Rebuild the server configuration from the management menu. The generated
-sing-box outbound uses the configured tag. A tokenized WARP installer link is
-printed at the end of the main installation; the script asks for the tag,
-installs and verifies WARP, saves these settings, and rebuilds sing-box. WARP
-registration credentials are local server secrets and are never stored in this
-repository.
+Server A can install a local Cloudflare WARP SOCKS5 proxy on
+`127.0.0.1:40000`. The WARP installer only adds the outbound and does not
+change routing rules automatically.
+
+The clean server policy contains only `.ru`, `.su`, `.рф`, and `geoip-ru`
+rules. They use `direct` by default. After WARP is installed successfully,
+choose their route in the manager: `5) service` -> `6) manage routing` ->
+`2) route for direct rules`, then select `direct` or the configured WARP tag.
+
+A tokenized WARP installer link is printed at the end of the main installation.
+The script asks for the tag, installs and verifies WARP, saves these settings,
+and rebuilds sing-box without switching the direct-rule route. WARP registration
+credentials are local server secrets and are never stored in this repository.
 
 ## Management after installation
 
@@ -116,4 +120,5 @@ template.json           — client profile for sing-box 1.12+ (modern)
 template-legacy.json     — client profile for sing-box 1.11.x (legacy)
 server-template.json     — technical server configuration template
 server-routing.json      — server route rule sets and policy rules
+install-warp.sh        — optional localized Cloudflare WARP installer
 stats.proto              — protobuf schema for traffic statistics collection

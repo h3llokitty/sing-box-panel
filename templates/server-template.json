@@ -19,7 +19,7 @@
       "peers": [ __PEERS__ ] }
   ],
   "outbounds": [
-    { "type": "direct", "tag": "direct" }__WARP_RU_OUTBOUND____B_HY2_OUTBOUND____B_VLESS_OUTBOUND____B_SELECTOR__
+    { "type": "direct", "tag": "direct" }__WARP_OUTBOUND____B_HY2_OUTBOUND____B_VLESS_OUTBOUND____B_SELECTOR__
   ],
   "route": { "rules": [ { "action": "sniff" }, { "protocol": "dns", "action": "hijack-dns" } ], "final": "__B_FINAL__" },
   "experimental": {

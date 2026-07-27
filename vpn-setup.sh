@@ -28,9 +28,9 @@ source "$CONFIG_FILE"
 : "${VLESS_SNI:=$VLESS_DEST}"
 : "${VLESS_INTERNAL_PORT_PRIMARY:=20000}"
 : "${AVAILABLE_PROXY_TYPES:=hy2 vless}"
-: "${WARP_RU_ENABLED:=0}"
-: "${WARP_RU_PORT:=40000}"
-: "${WARP_RU_TAG:=WARP}"
+: "${WARP_ENABLED:=0}"
+: "${WARP_PORT:=40000}"
+: "${WARP_TAG:=WARP}"
 ### ─────────────────────────────────────────────────────────
 
 AIPS_SPLIT='"0.0.0.0/5","8.0.0.0/7","11.0.0.0/8","12.0.0.0/6","16.0.0.0/4","32.0.0.0/3","64.0.0.0/2","128.0.0.0/3","160.0.0.0/5","168.0.0.0/6","172.0.0.0/12","172.32.0.0/11","172.64.0.0/10","172.128.0.0/9","173.0.0.0/8","174.0.0.0/7","176.0.0.0/4","192.0.0.0/9","192.128.0.0/11","192.160.0.0/13","192.169.0.0/16","192.170.0.0/15","192.172.0.0/14","192.176.0.0/12","192.192.0.0/10","193.0.0.0/8","194.0.0.0/7","196.0.0.0/6","200.0.0.0/5","208.0.0.0/4","::/0"'
@@ -176,15 +176,15 @@ rebuild_config() {
           \"short_id\": [\"${REALITY_SID}\"] } } }"
     done
   fi
-  local warp_ru_outbound="" b_hy2_outbound="" b_vless_outbound="" b_opts="\"direct\""
-  if [[ "$WARP_RU_ENABLED" == "1" ]]; then
-    [[ "$WARP_RU_TAG" =~ ^[A-Za-z0-9_-]+$ ]] || {
-      echo "invalid WARP_RU_TAG: use only letters, digits, _ and -" >&2
+  local warp_outbound="" b_hy2_outbound="" b_vless_outbound="" b_opts="\"direct\""
+  if [[ "$WARP_ENABLED" == "1" ]]; then
+    [[ "$WARP_TAG" =~ ^[A-Za-z0-9_-]+$ ]] || {
+      echo "$(t invalid_warp_tag)" >&2
       return 1
     }
-    warp_ru_outbound=",
-    { \"type\": \"socks\", \"tag\": \"${WARP_RU_TAG}\", \"server\": \"127.0.0.1\",
-      \"server_port\": ${WARP_RU_PORT}, \"version\": \"5\" }"
+    warp_outbound=",
+    { \"type\": \"socks\", \"tag\": \"${WARP_TAG}\", \"server\": \"127.0.0.1\",
+      \"server_port\": ${WARP_PORT}, \"version\": \"5\" }"
   fi
   local v2b_outbounds=""
   local transport_file=/etc/sing-box/transport.env
@@ -221,20 +221,26 @@ rebuild_config() {
       \"outbounds\": [ ${b_opts} ],
       \"default\": \"${TO_B_DEFAULT}\" }"
   local b_final="to-b"
+  local direct_route_file=/etc/sing-box/direct-route.env
+  local DIRECT_RULES_OUTBOUND="direct"
+  [[ -f "$direct_route_file" ]] && source "$direct_route_file"
+  if [[ "$WARP_ENABLED" != "1" || "$DIRECT_RULES_OUTBOUND" != "$WARP_TAG" ]]; then
+    DIRECT_RULES_OUTBOUND="direct"
+  fi
 
   local config_new="${CONFIG}.new"
   python3 - "$SERVER_TEMPLATE" "$SERVER_ROUTING" "$config_new" \
     "${HY2_PORT}" "${users}" "${HY2_OBFS}" "${A_DOMAIN}" "${ACME_EMAIL}" "${vless_inbound}" \
     "${WG_NET}" "${A_PRIV}" "${WG_PORT}" "${peers}" "${B_DOMAIN}" "${B_PORT}" "${B_PASS}" \
     "${b_vless_outbound}" "${b_selector}" "${b_final}" "${v2users}" "${b_hy2_outbound}" "${v2b_outbounds}" \
-    "${warp_ru_outbound}" "${WARP_RU_ENABLED}" "${WARP_RU_TAG}" <<'PYEOF'
+    "${warp_outbound}" "${WARP_ENABLED}" "${WARP_TAG}" "${DIRECT_RULES_OUTBOUND}" <<'PYEOF'
 import sys, json
 tmpl, routing, out = sys.argv[1:4]
 (hy2_port, users, hy2_obfs, a_domain, acme_email, vless_inbound,
  wg_net, a_priv, wg_port, peers, b_domain, b_port, b_pass,
  b_vless_outbound, b_selector, b_final, v2users,
- b_hy2_outbound, v2b_outbounds, warp_ru_outbound,
- warp_ru_enabled, warp_ru_tag) = sys.argv[4:26]
+ b_hy2_outbound, v2b_outbounds, warp_outbound,
+ warp_enabled, warp_tag, direct_rules_outbound) = sys.argv[4:27]
 s = open(tmpl).read()
 repl = {
     "__HY2_PORT__": hy2_port,
@@ -256,7 +262,7 @@ repl = {
     "__V2USERS__": v2users,
     "__B_HY2_OUTBOUND__": b_hy2_outbound,
     "__B_STATS_OUTBOUNDS__": v2b_outbounds,
-    "__WARP_RU_OUTBOUND__": warp_ru_outbound,
+    "__WARP_OUTBOUND__": warp_outbound,
 }
 for k, v in repl.items():
     s = s.replace(k, v)
@@ -268,11 +274,8 @@ rules = policy.get("rules", [])
 if not isinstance(rule_sets, list) or not isinstance(rules, list):
     raise ValueError("server-routing.json: rule_set and rules must be arrays")
 for rule in rules:
-    if rule.get("outbound") == "WARP_RU":
-        if warp_ru_enabled == "1":
-            rule["outbound"] = warp_ru_tag
-        else:
-            rule["outbound"] = "direct"
+    if rule.get("outbound") == "DIRECT_RULES":
+        rule["outbound"] = direct_rules_outbound
 config["route"]["rule_set"] = rule_sets
 config["route"]["rules"].extend(rules)
 with open(out, "w") as output_file:
@@ -281,11 +284,11 @@ with open(out, "w") as output_file:
 PYEOF
   if ! sing-box check -c "$config_new"; then
     rm -f "$config_new"
-    echo "server config check failed; active config was not changed" >&2
+    echo "$(t server_config_check_failed)" >&2
     return 1
   fi
   mv -f "$config_new" "$CONFIG"
-  echo "config OK"
+  echo "$(t config_ok)"
   systemctl enable --now sing-box >/dev/null 2>&1 || true
   systemctl restart --no-block sing-box
   echo "$(t singbox_restarted)"
@@ -965,7 +968,7 @@ service_menu() {
       traffic_menu
       ;;
     6)
-      transport_menu
+      routing_menu
       ;;
     7)
       reality_domains_menu
@@ -1034,6 +1037,47 @@ reality_domains_menu() {
       ;;
     *) echo "$(t invalid)" ;;
   esac
+}
+
+routing_menu() {
+  echo "$(t routing_header)"
+  echo "$(t routing_opt_ab)"
+  echo "$(t routing_opt_direct_rules)"
+  local c; read -rp "$(t prompt_choice_12)" c
+  case "$c" in
+    1) transport_menu ;;
+    2) direct_rules_route_menu ;;
+    *) echo "$(t invalid)" ;;
+  esac
+}
+
+direct_rules_route_menu() {
+  local route_file=/etc/sing-box/direct-route.env
+  local DIRECT_RULES_OUTBOUND="direct"
+  [[ -f "$route_file" ]] && source "$route_file"
+  if [[ "$WARP_ENABLED" != "1" || "$DIRECT_RULES_OUTBOUND" != "$WARP_TAG" ]]; then
+    DIRECT_RULES_OUTBOUND="direct"
+  fi
+
+  local opts=("direct")
+  local labels=("$(t direct_rules_label_direct)")
+  if [[ "$WARP_ENABLED" == "1" ]]; then
+    opts+=("$WARP_TAG")
+    labels+=("$(printf "$(t direct_rules_label_warp)" "$WARP_TAG")")
+  fi
+
+  printf -- "$(t direct_rules_header)\n" "$DIRECT_RULES_OUTBOUND"
+  local i
+  for ((i=0; i<${#opts[@]}; i++)); do
+    printf -- "$(t device_line)\n" "$((i+1))" "${labels[$i]}"
+  done
+  local n; read -rp "$(printf -- "$(t prompt_choice_1n)" "${#opts[@]}")" n
+  [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#opts[@]} )) || { echo "$(t invalid)"; return; }
+
+  local chosen="${opts[$((n-1))]}"
+  printf 'DIRECT_RULES_OUTBOUND="%s"\n' "$chosen" > "$route_file"
+  printf -- "$(t direct_rules_switched)\n" "$chosen"
+  rebuild_config
 }
 
 transport_menu() {

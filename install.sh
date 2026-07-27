@@ -4,10 +4,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/i18n.sh"
 
-echo "Select language / Выберите язык:"
-echo "  1) English (default)"
-echo "  2) Русский"
-read -rp "[1-2, Enter=1]: " LANG_CHOICE
+echo "$(t warp_language_title)"
+echo "$(t warp_language_en)"
+echo "$(t warp_language_ru)"
+read -rp "$(t warp_language_prompt)" LANG_CHOICE
 case "$LANG_CHOICE" in
   2) LANG_CODE="ru" ;;
   *) LANG_CODE="en" ;;
@@ -27,30 +27,120 @@ cleanup_failed_install() {
   echo "=================================================="
   echo "$(t rollback_header)"
   echo "=================================================="
-  systemctl stop sing-box nginx-cert-reload.path 2>/dev/null || true
-  systemctl disable sing-box nginx-cert-reload.path 2>/dev/null || true
+  systemctl stop sing-box nginx-cert-reload.path warp-svc 2>/dev/null || true
+  systemctl disable sing-box nginx-cert-reload.path warp-svc 2>/dev/null || true
+  if dpkg-query -W -f='${Status}' cloudflare-warp 2>/dev/null | grep -q 'ok installed'; then
+    DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq cloudflare-warp 2>/dev/null || true
+  fi
   rm -rf /etc/sing-box /opt/vpn /root/clients
-  rm -f /root/sb-panel /root/vpn-setup.sh
+  rm -rf /var/lib/cloudflare-warp
+  rm -f /root/sb-panel /root/vpn-setup.sh /root/i18n.sh
+  rm -f /etc/apt/sources.list.d/cloudflare-client.list
+  rm -f /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
   rm -f /etc/nginx/sites-enabled/profiles /etc/nginx/sites-available/profiles
   rm -f /etc/nginx/conf.d/singbox-ua.conf
   rm -f /etc/systemd/system/sing-box.service
+  rm -f /etc/systemd/system/sing-box.service.d/warp.conf
   rm -f /etc/systemd/system/nginx-cert-reload.path /etc/systemd/system/nginx-cert-reload.service
   systemctl daemon-reload 2>/dev/null || true
   echo "$(t rollback_done)"
   echo "$(t rollback_binary_kept)"
 }
 
+update_existing_install() {
+  echo "$(t update_started)"
+  local replace_routing=0
+  if [[ -f /opt/vpn/server-routing.json ]]; then
+    printf "$(t routing_file_found)\n" "/opt/vpn/server-routing.json"
+    echo "$(t routing_keep_option)"
+    echo "$(t routing_replace_option)"
+    local routing_choice
+    read -rp "$(t prompt_choice_12_default1)" routing_choice
+    case "${routing_choice:-1}" in
+      1) replace_routing=0 ;;
+      2) replace_routing=1 ;;
+      *) echo "$(t invalid)"; return 1 ;;
+    esac
+  else
+    replace_routing=1
+  fi
+
+  bash -n "$SCRIPT_DIR/vpn-setup.sh" "$SCRIPT_DIR/i18n.sh" "$SCRIPT_DIR/templates/install-warp.sh"
+  jq empty "$SCRIPT_DIR/templates/server-routing.json"
+
+  local stamp backup
+  stamp=$(date +%Y%m%d%H%M%S)
+  backup="/root/vpn-update-backup-${stamp}"
+  install -d -m 0700 "$backup/root" "$backup/opt-vpn"
+  [[ -f /root/vpn-setup.sh ]] && cp -a /root/vpn-setup.sh "$backup/root/"
+  [[ -f /root/i18n.sh ]] && cp -a /root/i18n.sh "$backup/root/"
+  local file
+  for file in i18n.sh template.json template-legacy.json stats.proto server-template.json server-routing.json; do
+    [[ -f "/opt/vpn/$file" ]] && cp -a "/opt/vpn/$file" "$backup/opt-vpn/"
+  done
+  [[ -f /etc/sing-box/config.json ]] && cp -a /etc/sing-box/config.json "$backup/config.json"
+
+  install -m 0755 "$SCRIPT_DIR/vpn-setup.sh" /root/vpn-setup.sh
+  install -m 0644 "$SCRIPT_DIR/i18n.sh" /root/i18n.sh
+  install -m 0644 "$SCRIPT_DIR/i18n.sh" /opt/vpn/i18n.sh
+  install -m 0644 "$SCRIPT_DIR/templates/template.json" /opt/vpn/template.json
+  install -m 0644 "$SCRIPT_DIR/templates/template-legacy.json" /opt/vpn/template-legacy.json
+  install -m 0644 "$SCRIPT_DIR/templates/stats.proto" /opt/vpn/stats.proto
+  install -m 0644 "$SCRIPT_DIR/templates/server-template.json" /opt/vpn/server-template.json
+  if [[ "$replace_routing" == "1" ]]; then
+    install -m 0644 "$SCRIPT_DIR/templates/server-routing.json" /opt/vpn/server-routing.json
+    echo "$(t routing_replaced)"
+  else
+    echo "$(t routing_kept)"
+  fi
+
+  if ! VPN_CONFIG=/etc/sing-box/vpn-panel.env /root/vpn-setup.sh --rebuild-config; then
+    [[ -f "$backup/root/vpn-setup.sh" ]] && cp -a "$backup/root/vpn-setup.sh" /root/vpn-setup.sh
+    [[ -f "$backup/root/i18n.sh" ]] && cp -a "$backup/root/i18n.sh" /root/i18n.sh
+    for file in i18n.sh template.json template-legacy.json stats.proto server-template.json server-routing.json; do
+      [[ -f "$backup/opt-vpn/$file" ]] && cp -a "$backup/opt-vpn/$file" "/opt/vpn/$file"
+    done
+    [[ -f "$backup/config.json" ]] && cp -a "$backup/config.json" /etc/sing-box/config.json
+    systemctl restart --no-block sing-box || true
+    printf "$(t update_failed_restored)\n" "$backup" >&2
+    return 1
+  fi
+
+  printf "$(t update_completed)\n" "$backup"
+}
+
 if [[ -f "$DONE_MARKER" ]]; then
   printf "$(t done_marker_found)\n" "$(cat "$DONE_MARKER" 2>/dev/null)"
-  echo "$(t done_marker_warning)"
-  read -rp "$(t confirm_reinstall)" CONFIRM_REINSTALL
-  if [[ "${CONFIRM_REINSTALL,,}" != "y" ]]; then
-    echo "$(t reinstall_cancelled)"
-    exit 0
-  fi
-  echo "$(t reinstall_proceeding)"
-  cleanup_failed_install
-  rm -f "$DONE_MARKER"
+  echo "$(t existing_install_action)"
+  echo "$(t existing_install_update)"
+  echo "$(t existing_install_reinstall)"
+  echo "$(t existing_install_cancel)"
+  read -rp "$(t prompt_choice_012_default1)" EXISTING_ACTION
+  case "${EXISTING_ACTION:-1}" in
+    1)
+      update_existing_install
+      exit $?
+      ;;
+    2)
+      echo "$(t done_marker_warning)"
+      read -rp "$(t confirm_reinstall)" CONFIRM_REINSTALL
+      if [[ "${CONFIRM_REINSTALL,,}" != "y" ]]; then
+        echo "$(t reinstall_cancelled)"
+        exit 0
+      fi
+      echo "$(t reinstall_proceeding)"
+      cleanup_failed_install
+      rm -f "$DONE_MARKER"
+      ;;
+    0)
+      echo "$(t reinstall_cancelled)"
+      exit 0
+      ;;
+    *)
+      echo "$(t invalid)"
+      exit 1
+      ;;
+  esac
 fi
 
 if [[ -f "$MARKER" ]]; then
@@ -223,14 +313,28 @@ VLESS_PORT=$HY2_PORT
 VLESS_DEST="$VLESS_DEST"
 VLESS_SNI="$VLESS_SNI"
 AVAILABLE_PROXY_TYPES="hy2 vless"
-WARP_RU_ENABLED=0
-WARP_RU_PORT=40000
-WARP_RU_TAG="WARP"
+WARP_ENABLED=0
+WARP_PORT=40000
+WARP_TAG="WARP"
 LANG_CODE="$LANG_CODE"
 EOF
   chmod 600 "$CONFIG_ENV"
   printf "$(t config_written)\n" "$CONFIG_ENV"
 fi
+
+for WARP_MIGRATION in \
+  'WARP_RU_ENABLED:WARP_ENABLED' \
+  'WARP_RU_PORT:WARP_PORT' \
+  'WARP_RU_TAG:WARP_TAG'
+do
+  OLD_KEY=${WARP_MIGRATION%%:*}
+  NEW_KEY=${WARP_MIGRATION#*:}
+  if ! grep -q "^${NEW_KEY}=" "$CONFIG_ENV" && grep -q "^${OLD_KEY}=" "$CONFIG_ENV"; then
+    sed -i "s/^${OLD_KEY}=/${NEW_KEY}=/" "$CONFIG_ENV"
+  else
+    sed -i "/^${OLD_KEY}=/d" "$CONFIG_ENV"
+  fi
+done
 
 if [[ "${B_NEEDS_INSTALL:-0}" == "1" ]]; then
   echo
@@ -342,126 +446,14 @@ ln -sf /etc/sing-box /opt/vpn/sing-box
 ln -sf /etc/nginx /opt/vpn/nginx
 cp "$SCRIPT_DIR/vpn-setup.sh" /root/vpn-setup.sh
 cp "$SCRIPT_DIR/i18n.sh" /root/i18n.sh
+cp "$SCRIPT_DIR/i18n.sh" /opt/vpn/i18n.sh
+chmod 644 /opt/vpn/i18n.sh
 chmod +x /root/vpn-setup.sh
 
 WARP_TOKEN=$(openssl rand -hex 8)
 WARP_INSTALL_PATH="/opt/vpn/profiles/install-warp-${WARP_TOKEN}.sh"
-cat > "$WARP_INSTALL_PATH" <<'WARPEOF'
-#!/usr/bin/env bash
-set -euo pipefail
-
-if [[ $EUID -ne 0 ]]; then
-  echo "Run this script as root." >&2
-  exit 1
-fi
-
-CONFIG_ENV=/etc/sing-box/vpn-panel.env
-if [[ ! -f "$CONFIG_ENV" || ! -x /root/vpn-setup.sh ]]; then
-  echo "sing-box-panel is not installed on this server." >&2
-  exit 1
-fi
-
-read -rp "sing-box outbound tag [WARP]: " WARP_TAG
-WARP_TAG=${WARP_TAG:-WARP}
-if [[ ! "$WARP_TAG" =~ ^[A-Za-z0-9_-]+$ ]]; then
-  echo "Invalid tag. Use only letters, digits, _ and -." >&2
-  exit 1
-fi
-read -rp "Local WARP SOCKS5 port [40000]: " WARP_PORT
-WARP_PORT=${WARP_PORT:-40000}
-if [[ ! "$WARP_PORT" =~ ^[0-9]+$ ]] || (( WARP_PORT < 1024 || WARP_PORT > 65535 )); then
-  echo "Invalid port." >&2
-  exit 1
-fi
-
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq --no-install-recommends curl ca-certificates gnupg lsb-release
-install -d -m 0755 /usr/share/keyrings
-curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg |
-  gpg --dearmor --yes -o /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
-printf 'deb [arch=%s signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ %s main\n' \
-  "$(dpkg --print-architecture)" "$(lsb_release -cs)" \
-  > /etc/apt/sources.list.d/cloudflare-client.list
-apt-get update -qq
-apt-get install -y -qq cloudflare-warp
-systemctl enable --now warp-svc
-
-if ! warp-cli --accept-tos registration show >/dev/null 2>&1; then
-  if ! warp-cli --accept-tos registration new; then
-    echo
-    echo "Cloudflare registration API is unavailable from this server."
-    echo "Register through an external connection, then run this script again."
-    exit 1
-  fi
-fi
-
-warp-cli --accept-tos proxy port "$WARP_PORT"
-warp-cli --accept-tos mode proxy
-warp-cli --accept-tos connect
-
-connected=0
-for _ in $(seq 1 15); do
-  if warp-cli --accept-tos status 2>/dev/null | grep -q 'Connected'; then
-    connected=1
-    break
-  fi
-  sleep 2
-done
-if [[ $connected -ne 1 ]]; then
-  echo "WARP did not connect." >&2
-  warp-cli --accept-tos status || true
-  exit 1
-fi
-
-if ! ss -lnt | grep -q "127.0.0.1:${WARP_PORT}"; then
-  echo "WARP SOCKS5 listener did not appear on 127.0.0.1:${WARP_PORT}." >&2
-  exit 1
-fi
-TRACE=$(curl -4 --socks5 "127.0.0.1:${WARP_PORT}" --connect-timeout 10 --max-time 25 \
-  https://www.cloudflare.com/cdn-cgi/trace)
-grep -qx 'warp=on' <<<"$TRACE" || {
-  echo "WARP health check failed: warp=on was not returned." >&2
-  exit 1
-}
-WARP_IP=$(awk -F= '$1 == "ip" { print $2 }' <<<"$TRACE")
-[[ "$WARP_IP" == *.* ]] || {
-  echo "WARP health check did not return an IPv4 address." >&2
-  exit 1
-}
-
-ENV_BACKUP="${CONFIG_ENV}.before-warp.$(date +%Y%m%d%H%M%S)"
-cp -a "$CONFIG_ENV" "$ENV_BACKUP"
-sed -i \
-  -e '/^WARP_RU_ENABLED=/d' \
-  -e '/^WARP_RU_PORT=/d' \
-  -e '/^WARP_RU_TAG=/d' \
-  "$CONFIG_ENV"
-printf '\nWARP_RU_ENABLED=1\nWARP_RU_PORT=%s\nWARP_RU_TAG="%s"\n' \
-  "$WARP_PORT" "$WARP_TAG" >> "$CONFIG_ENV"
-
-install -d -m 0755 /etc/systemd/system/sing-box.service.d
-cat > /etc/systemd/system/sing-box.service.d/warp.conf <<'UNIT'
-[Unit]
-Wants=warp-svc.service
-After=warp-svc.service
-UNIT
-systemctl daemon-reload
-
-if ! VPN_CONFIG="$CONFIG_ENV" /root/vpn-setup.sh --rebuild-config; then
-  cp -a "$ENV_BACKUP" "$CONFIG_ENV"
-  echo "sing-box rebuild failed; vpn-panel.env was restored from $ENV_BACKUP" >&2
-  exit 1
-fi
-
-echo
-echo "WARP is ready."
-echo "  outbound tag: $WARP_TAG"
-echo "  SOCKS5:       127.0.0.1:$WARP_PORT"
-echo "  WARP IPv4:    $WARP_IP"
-echo "  env backup:   $ENV_BACKUP"
-WARPEOF
-chmod 700 "$WARP_INSTALL_PATH"
+cp "$SCRIPT_DIR/templates/install-warp.sh" "$WARP_INSTALL_PATH"
+chmod 755 "$WARP_INSTALL_PATH"
 
 cat > /root/sb-panel <<EOF
 #!/usr/bin/env bash
@@ -509,7 +501,7 @@ server {
         try_files \$uri =404;
         add_header Cache-Control "no-store";
     }
-    location ~ ^/install-b-[a-f0-9]+\.sh$ {
+    location ~ ^/install-(b|warp)-[a-f0-9]+\.sh$ {
         try_files \$uri =404;
         default_type text/x-shellscript;
         add_header Cache-Control "no-store";
