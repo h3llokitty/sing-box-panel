@@ -77,6 +77,8 @@ rules. They use `direct` by default. After WARP is installed successfully,
 choose their route in the manager: `5) service` -> `6) manage routing` ->
 `2) route for direct rules`, then select `direct` or the configured WARP tag.
 
+If direct Cloudflare registration is unavailable, the installer can guide the user through a temporary reverse SOCKS connection from another computer. The generated SSH command works with OpenSSH on macOS, Linux, and Windows PowerShell; temporary proxy settings are removed immediately after registration.
+
 A tokenized WARP installer link is printed at the end of the main installation.
 The script asks for the tag, installs and verifies WARP, saves these settings,
 and rebuilds sing-box without switching the direct-rule route. WARP registration

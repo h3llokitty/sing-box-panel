@@ -54,16 +54,88 @@ apt-get update -qq
 apt-get install -y -qq cloudflare-warp
 systemctl enable --now warp-svc
 
+register_via_external_computer() {
+  echo
+  echo "$(t warp_registration_unavailable)"
+  read -rp "$(t warp_external_offer)" USE_EXTERNAL
+  [[ "${USE_EXTERNAL,,}" != "n" ]] || return 1
+
+  local reg_port server_ip direct_ip external_trace external_ip
+  read -rp "$(t warp_external_port_prompt)" reg_port
+  reg_port=${reg_port:-41080}
+  if [[ ! "$reg_port" =~ ^[0-9]+$ ]] || (( reg_port < 1024 || reg_port > 65535 )); then
+    echo "$(t warp_port_invalid)" >&2
+    return 1
+  fi
+  server_ip=$(bash -c 'source "$1"; printf "%s" "$A_IP"' _ "$CONFIG_ENV")
+  [[ -n "$server_ip" ]] || { echo "$(t warp_external_server_ip_missing)" >&2; return 1; }
+
+  echo
+  echo "$(t warp_external_command_intro)"
+  printf '  ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -R 127.0.0.1:%s root@%s\n' "$reg_port" "$server_ip"
+  echo "$(t warp_external_command_note)"
+  read -rp "$(t warp_external_ready_prompt)" _
+
+  if ! ss -lnt | grep -q "127.0.0.1:${reg_port}"; then
+    printf "$(t warp_external_listener_missing)\n" "$reg_port" >&2
+    return 1
+  fi
+  direct_ip=$(curl -4 -sS --connect-timeout 10 --max-time 20 https://www.cloudflare.com/cdn-cgi/trace | awk -F= '$1 == "ip" {print $2}')
+  external_trace=$(curl -sS --socks5-hostname "127.0.0.1:${reg_port}" --connect-timeout 10 --max-time 20 https://www.cloudflare.com/cdn-cgi/trace) || {
+    echo "$(t warp_external_proxy_failed)" >&2
+    return 1
+  }
+  external_ip=$(awk -F= '$1 == "ip" {print $2}' <<<"$external_trace")
+  if [[ -z "$external_ip" || "$external_ip" == "$direct_ip" ]]; then
+    echo "$(t warp_external_same_ip)" >&2
+    return 1
+  fi
+  printf "$(t warp_external_ips)\n" "$direct_ip" "$external_ip"
+
+  apt-get install -y -qq --no-install-recommends proxychains4
+  local proxy_lib proxy_conf dropin_dir dropin
+  proxy_lib=$(find /usr/lib -name 'libproxychains.so.4' -print -quit)
+  [[ -n "$proxy_lib" ]] || { echo "$(t warp_external_proxychains_missing)" >&2; return 1; }
+  proxy_conf=/run/sing-box-panel-warp-proxychains.conf
+  dropin_dir=/etc/systemd/system/warp-svc.service.d
+  dropin="${dropin_dir}/registration-proxy.conf"
+  if [[ -e "$dropin" ]]; then
+    printf "$(t warp_external_dropin_exists)\n" "$dropin" >&2
+    return 1
+  fi
+
+  cleanup_registration_proxy() {
+    rm -f "$dropin" "$proxy_conf"
+    systemctl daemon-reload
+    systemctl restart warp-svc
+  }
+  trap cleanup_registration_proxy EXIT INT TERM
+  install -d -m 0755 "$dropin_dir"
+  printf '%s\n' strict_chain proxy_dns 'remote_dns_subnet 224' 'tcp_read_time_out 15000' 'tcp_connect_time_out 8000' quiet_mode '[ProxyList]' "socks5 127.0.0.1 $reg_port" > "$proxy_conf"
+  printf '%s\n' '[Service]' "Environment=LD_PRELOAD=${proxy_lib}" "Environment=PROXYCHAINS_CONF_FILE=${proxy_conf}" > "$dropin"
+  systemctl daemon-reload
+  systemctl restart warp-svc
+  sleep 2
+
+  local registration_rc=0
+  timeout 45 warp-cli --accept-tos registration new || registration_rc=$?
+  cleanup_registration_proxy
+  trap - EXIT INT TERM
+  [[ $registration_rc -eq 0 ]] || { echo "$(t warp_external_registration_failed)" >&2; return 1; }
+  warp-cli --accept-tos registration show >/dev/null
+  echo "$(t warp_external_registration_done)"
+}
+
 if ! warp-cli --accept-tos registration show >/dev/null 2>&1; then
   if ! warp-cli --accept-tos registration new; then
-    echo
-    echo "$(t warp_registration_unavailable)"
-    echo "$(t warp_registration_external)"
-    printf "$(t warp_registration_docs)\n" \
-      "https://developers.cloudflare.com/warp-client/get-started/linux/"
-    echo "$(t warp_registration_step1)"
-    echo "$(t warp_registration_step2)"
-    exit 1
+    if ! register_via_external_computer; then
+      echo
+      echo "$(t warp_registration_external)"
+      printf "$(t warp_registration_docs)\n" "https://developers.cloudflare.com/warp-client/get-started/linux/"
+      echo "$(t warp_registration_step1)"
+      echo "$(t warp_registration_step2)"
+      exit 1
+    fi
   fi
 fi
 
