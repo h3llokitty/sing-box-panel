@@ -65,7 +65,7 @@ update_existing_install() {
     replace_routing=1
   fi
 
-  bash -n "$SCRIPT_DIR/vpn-setup.sh" "$SCRIPT_DIR/i18n.sh" "$SCRIPT_DIR/templates/install-warp.sh"
+  bash -n "$SCRIPT_DIR/vpn-setup.sh" "$SCRIPT_DIR/i18n.sh" "$SCRIPT_DIR/install-warp.sh"
   jq empty "$SCRIPT_DIR/templates/server-routing.json"
 
   local stamp backup
@@ -452,7 +452,7 @@ chmod +x /root/vpn-setup.sh
 
 WARP_TOKEN=$(openssl rand -hex 8)
 WARP_INSTALL_PATH="/opt/vpn/profiles/install-warp-${WARP_TOKEN}.sh"
-cp "$SCRIPT_DIR/templates/install-warp.sh" "$WARP_INSTALL_PATH"
+cp "$SCRIPT_DIR/install-warp.sh" "$WARP_INSTALL_PATH"
 chmod 755 "$WARP_INSTALL_PATH"
 
 cat > /root/sb-panel <<EOF

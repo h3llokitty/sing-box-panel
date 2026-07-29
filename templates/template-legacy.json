@@ -11,10 +11,10 @@
         "auto_detect_interface": true,
         "final": "Select",
         "rule_set": [
-            { "tag": "geoip-russia", "type": "remote", "format": "binary", "url": "https://unicorns.kz/sources/geoip/geoip-ru.srs", "download_detour": "direct" },
-            { "tag": "yandex", "type": "remote", "format": "binary", "url": "https://unicorns.kz/sources/geosite/yandex.srs", "download_detour": "direct" },
-            { "tag": "geoip-yandex", "type": "remote", "format": "binary", "url": "https://unicorns.kz/sources/geoip/geoip-yandex.srs", "download_detour": "direct" },
-            { "tag": "kinopoisk", "type": "remote", "format": "binary", "url": "https://unicorns.kz/sources/geosite/kinopoisk.srs", "download_detour": "direct" }
+            { "tag": "geoip-russia", "type": "remote", "format": "binary", "url": "https://fi.llokitty.com/geoip/geoip-ru.srs", "download_detour": "direct" },
+            { "tag": "yandex", "type": "remote", "format": "binary", "url": "https://fi.llokitty.com/geosite/yandex.srs", "download_detour": "direct" },
+            { "tag": "geoip-yandex", "type": "remote", "format": "binary", "url": "https://fi.llokitty.com/geoip/geoip-yandex.srs", "download_detour": "direct" },
+            { "tag": "kinopoisk", "type": "remote", "format": "binary", "url": "https://fi.llokitty.com/geosite/kinopoisk.srs", "download_detour": "direct" }
         ],
         "rules": [
             { "inbound": ["tun-in","mixed-in"], "port": [53], "action": "hijack-dns" },
