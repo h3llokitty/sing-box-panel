@@ -338,6 +338,8 @@ AVAILABLE_PROXY_TYPES="hy2 vless"
 WARP_ENABLED=0
 WARP_PORT=40000
 WARP_TAG="WARP"
+FILES_DOMAIN=""
+FILES_INTERNAL_PORT=9443
 LANG_CODE="$LANG_CODE"
 EOF
   chmod 600 "$CONFIG_ENV"
@@ -554,11 +556,14 @@ SVCUNIT
 systemctl daemon-reload
 systemctl enable --now nginx-cert-reload.path
 
-# nginx мог быть остановлен на предыдущих шагах (или его конфиг изменился впервые) —
-# reload не поднимает остановленный сервис, поэтому явно restart
 CERT_PATH="/var/lib/sing-box/.local/share/certmagic/certificates/acme-v02.api.letsencrypt.org-directory/${A_DOMAIN}/${A_DOMAIN}.crt"
 if [[ -f "$CERT_PATH" ]]; then
-  nginx -t && systemctl restart nginx
+  nginx -t
+  if systemctl is-active --quiet nginx; then
+    systemctl reload nginx
+  else
+    systemctl start nginx
+  fi
 else
   echo "$(t cert_not_ready_yet_install)"
 fi

@@ -31,6 +31,8 @@ source "$CONFIG_FILE"
 : "${WARP_ENABLED:=0}"
 : "${WARP_PORT:=40000}"
 : "${WARP_TAG:=WARP}"
+: "${FILES_DOMAIN:=}"
+: "${FILES_INTERNAL_PORT:=9443}"
 ### ─────────────────────────────────────────────────────────
 
 AIPS_SPLIT='"0.0.0.0/5","8.0.0.0/7","11.0.0.0/8","12.0.0.0/6","16.0.0.0/4","32.0.0.0/3","64.0.0.0/2","128.0.0.0/3","160.0.0.0/5","168.0.0.0/6","172.0.0.0/12","172.32.0.0/11","172.64.0.0/10","172.128.0.0/9","173.0.0.0/8","174.0.0.0/7","176.0.0.0/4","192.0.0.0/9","192.128.0.0/11","192.160.0.0/13","192.169.0.0/16","192.170.0.0/15","192.172.0.0/14","192.176.0.0/12","192.192.0.0/10","193.0.0.0/8","194.0.0.0/7","196.0.0.0/6","200.0.0.0/5","208.0.0.0/4","::/0"'
@@ -86,6 +88,10 @@ write_nginx_stream() {
     map_entries="${map_entries}    ${vd_dom} 127.0.0.1:${vd_port};\n"
   done
 
+  if [[ -n "$FILES_DOMAIN" ]]; then
+    map_entries="    ${FILES_DOMAIN} 127.0.0.1:${FILES_INTERNAL_PORT};\n${map_entries}"
+  fi
+
   mkdir -p /etc/nginx/stream.d
   {
     echo "map \$ssl_preread_server_name \$vless_backend {"
@@ -94,8 +100,7 @@ write_nginx_stream() {
     echo "}"
     echo
     echo "server {"
-    echo "    listen ${VLESS_PORT};"
-    echo "    listen [::]:${VLESS_PORT};"
+    echo "    listen ${A_IP}:${VLESS_PORT};"
     echo "    ssl_preread on;"
     echo "    proxy_pass \$vless_backend;"
     echo "}"
@@ -109,7 +114,12 @@ write_nginx_stream() {
 
   local cert_path="/var/lib/sing-box/.local/share/certmagic/certificates/acme-v02.api.letsencrypt.org-directory/${A_DOMAIN}/${A_DOMAIN}.crt"
   if [[ -f "$cert_path" ]]; then
-    nginx -t && systemctl restart nginx
+    nginx -t
+    if systemctl is-active --quiet nginx; then
+      systemctl reload nginx
+    else
+      systemctl start nginx
+    fi
   else
     printf -- "$(t cert_not_ready_yet)\n" "${A_DOMAIN}"
   fi
