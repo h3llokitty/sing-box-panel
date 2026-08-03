@@ -476,8 +476,8 @@ urltest_json() {
 { "type": "urltest", "tag": "auto",
   "outbounds": [ ${opts} ],
   "url": "https://www.gstatic.com/generate_204",
-  "interval": "5m",
-  "tolerance": 200 }
+  "interval": "15m",
+  "tolerance": 100 }
 UT
 }
 
