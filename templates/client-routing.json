@@ -1,34 +1,5 @@
 {
-  "rule_set": [
-    {
-      "tag": "geoip-russia",
-      "type": "remote",
-      "format": "binary",
-      "url": "__RULESET_BASE_URL__/geoip/geoip-ru.srs",
-      "download_detour": "direct"
-    },
-    {
-      "tag": "yandex",
-      "type": "remote",
-      "format": "binary",
-      "url": "__RULESET_BASE_URL__/geosite/yandex.srs",
-      "download_detour": "direct"
-    },
-    {
-      "tag": "geoip-yandex",
-      "type": "remote",
-      "format": "binary",
-      "url": "__RULESET_BASE_URL__/geoip/geoip-yandex.srs",
-      "download_detour": "direct"
-    },
-    {
-      "tag": "kinopoisk",
-      "type": "remote",
-      "format": "binary",
-      "url": "__RULESET_BASE_URL__/geosite/kinopoisk.srs",
-      "download_detour": "direct"
-    }
-  ],
+  "rule_set": [],
   "rules": [
     {
       "domain_keyword": ["habr"],
@@ -37,11 +8,6 @@
     {
       "domain_suffix": ["reddit.com"],
       "domain_keyword": ["2gis", "dgis"],
-      "domain_regex": [".*\\.ru$", ".*\\.su$"],
-      "outbound": "direct"
-    },
-    {
-      "rule_set": ["yandex", "geoip-yandex", "kinopoisk", "geoip-russia"],
       "outbound": "direct"
     }
   ]

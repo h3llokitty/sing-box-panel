@@ -1,28 +1,4 @@
 {
-  "rule_set": [
-    {
-      "tag": "geoip-russia",
-      "type": "remote",
-      "format": "binary",
-      "url": "__RULESET_BASE_URL__/geoip/geoip-ru.srs",
-      "download_detour": "direct"
-    }
-  ],
-  "rules": [
-    {
-      "domain_suffix": [
-        ".ru",
-        ".su",
-        ".рф",
-        ".xn--p1ai"
-      ],
-      "outbound": "DIRECT_RULES"
-    },
-    {
-      "rule_set": [
-        "geoip-russia"
-      ],
-      "outbound": "DIRECT_RULES"
-    }
-  ]
+  "rule_set": [],
+  "rules": []
 }

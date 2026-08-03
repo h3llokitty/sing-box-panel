@@ -179,8 +179,17 @@ T[reality_a_notice2.ru]="сайт должен реально поддержив
 T[prompt_vless_dest_a.en]="  Reality masking domain for A (VLESS_DEST): "
 T[prompt_vless_dest_a.ru]="  Домен маскировки Reality для сервера A (VLESS_DEST): "
 
-T[ruleset_intro.en]="Rule-set storage (the base URL must contain the geoip/ and geosite/ directories):"
-T[ruleset_intro.ru]="Хранилище rule-set (в базовом URL должны находиться каталоги geoip/ и geosite/):"
+T[ru_rules_question.en]="Use the standard rules for Russian resources (.ru/.su/.рф/.xn--p1ai and geoip-ru)?"
+T[ru_rules_question.ru]="Использовать стандартные правила для российских ресурсов (.ru/.su/.рф/.xn--p1ai и geoip-ru)?"
+
+T[ru_rules_disabled_option.en]="  1) no (default)"
+T[ru_rules_disabled_option.ru]="  1) нет (по умолчанию)"
+
+T[ru_rules_enabled_option.en]="  2) yes"
+T[ru_rules_enabled_option.ru]="  2) да"
+
+T[ruleset_intro.en]="Rule-set storage (the base URL must contain geoip/geoip-ru.srs):"
+T[ruleset_intro.ru]="Хранилище rule-set (в базовом URL должен находиться geoip/geoip-ru.srs):"
 
 T[prompt_ruleset_base.en]="  Rule-set base URL [%s]: "
 T[prompt_ruleset_base.ru]="  Базовый URL rule-set [%s]: "
@@ -209,6 +218,15 @@ T[ruleset_existing_retry.ru]="Хранилище недоступно или с�
 T[ruleset_file_unavailable.en]="Required rule-set file is unavailable: %s"
 T[ruleset_file_unavailable.ru]="Недоступен обязательный файл rule-set: %s"
 
+T[ruleset_file_invalid.en]="The downloaded rule-set file is not a valid sing-box binary rule set: %s"
+T[ruleset_file_invalid.ru]="Загруженный файл не является корректным бинарным rule-set sing-box: %s"
+
+T[ruleset_bundled_missing.en]="The bundled geoip-ru rule set is missing: %s"
+T[ruleset_bundled_missing.ru]="В комплекте установки отсутствует rule-set geoip-ru: %s"
+
+T[ruleset_bundled_invalid.en]="The bundled geoip-ru rule set is invalid: %s"
+T[ruleset_bundled_invalid.ru]="Встроенный rule-set geoip-ru повреждён или имеет неверный формат: %s"
+
 T[ruleset_local_port_invalid.en]="A local rule-set URL must use the standard HTTPS port 443; do not specify a port."
 T[ruleset_local_port_invalid.ru]="Локальный URL rule-set должен использовать стандартный HTTPS-порт 443; не указывайте порт вручную."
 
@@ -218,8 +236,8 @@ T[ruleset_local_domain_conflict.ru]="Локальному хранилищу rul
 T[ruleset_dns_mismatch.en]="Rule-set domain %s currently resolves to '%s', not to this server (%s). Configure its A record and run the installer again."
 T[ruleset_dns_mismatch.ru]="Домен rule-set %s сейчас указывает на '%s', а не на этот сервер (%s). Настройте A-запись и снова запустите установщик."
 
-T[ruleset_local_installing.en]="Creating the local rule-set storage and obtaining its TLS certificate..."
-T[ruleset_local_installing.ru]="Создание локального хранилища rule-set и получение TLS-сертификата..."
+T[ruleset_local_installing.en]="Publishing the bundled geoip-ru rule set and obtaining a TLS certificate..."
+T[ruleset_local_installing.ru]="Публикация встроенного rule-set geoip-ru и получение TLS-сертификата..."
 
 T[ruleset_local_ready.en]="Local rule-set storage is ready."
 T[ruleset_local_ready.ru]="Локальное хранилище rule-set готово."

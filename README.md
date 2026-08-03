@@ -33,17 +33,21 @@ you'll be asked to choose a language on first run. It will then ask for:
 - server B's domain, port, and password (or generate a new server B setup —
   see below)
 - the masking site for VLESS+Reality (see below)
-- the base URL for rule sets and whether it is already available or should be
-  hosted on server A
+- whether to enable the standard Russian-resource policy (`.ru`, `.su`, `.рф`,
+  `.xn--p1ai`, and `geoip-ru`)
+- when that policy is enabled, the rule-set base URL and whether it is already
+  available or should be hosted on server A
 
 The installation compiles sing-box from source with `with_v2ray_api` support
 (required for per-client traffic statistics) — this takes 5-15 minutes.
 
-The rule-set base URL must expose `geoip/` and `geosite/` directories. When
-local hosting is selected, the installer downloads the four standard rule
-sets, obtains a separate TLS certificate, serves them through loopback nginx,
-and adds their domain to the public port 443 SNI multiplexer. An external
-storage choice is accepted only after all four required files are reachable.
+The Russian-resource policy is disabled by default. When enabled, its suffix
+rules and `geoip-ru` are added together to both server and client routing. The
+rule-set base URL must expose `geoip/geoip-ru.srs`. With local hosting selected,
+the installer publishes the bundled `rulesets/geoip/geoip-ru.srs`, obtains a
+separate TLS certificate, serves it through loopback nginx, and adds its domain
+to the public port 443 SNI multiplexer. External storage is accepted only after
+the installer downloads and validates that file as a sing-box binary rule set.
 
 If server B doesn't exist yet, `install.sh` will generate a ready-to-run
 `install-b.sh` script and print a `curl | sudo bash` command to deploy it —
@@ -83,10 +87,11 @@ Server A can install a local Cloudflare WARP SOCKS5 proxy on
 `127.0.0.1:40000`. The WARP installer only adds the outbound and does not
 change routing rules automatically.
 
-The clean server policy contains only `.ru`, `.su`, `.рф`, and `geoip-ru`
-rules. They use `direct` by default. After WARP is installed successfully,
-choose their route in the manager: `5) service` -> `6) manage routing` ->
-`2) route for direct rules`, then select `direct` or the configured WARP tag.
+When the optional Russian-resource policy is enabled, its `.ru`, `.su`, `.рф`,
+`.xn--p1ai`, and `geoip-ru` rules use `direct` by default. After WARP is
+installed successfully, choose their route in the manager: `5) service` ->
+`6) manage routing` -> `2) route for direct rules`, then select `direct` or the
+configured WARP tag.
 
 If direct Cloudflare registration is unavailable, the installer can guide the user through a temporary reverse SOCKS connection from another computer. The generated SSH command works with OpenSSH on macOS, Linux, and Windows PowerShell; temporary proxy settings are removed immediately after registration.
 
@@ -141,6 +146,7 @@ install.sh              — installer for a clean server
 i18n.sh                 — translation table (English/Russian) for install.sh
 vpn-setup.sh            — CLI client manager (run via /root/sb-panel)
 config.env.example      — reference list of parameters (install.sh asks for them itself)
+rulesets/geoip/geoip-ru.srs — bundled optional Russian IPv4 rule set
 templates/
 template.json           — client profile for sing-box 1.12+ (modern)
 template-legacy.json     — client profile for sing-box 1.11.x (legacy)
