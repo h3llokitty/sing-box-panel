@@ -8,22 +8,14 @@
     "auto_detect_interface": true,
     "default_domain_resolver": "dns-local",
     "final": "Select",
-    "rule_set": [
-      { "tag": "geoip-russia", "type": "remote", "format": "binary", "url": "https://fi.llokitty.com/geoip/geoip-ru.srs", "download_detour": "direct" },
-      { "tag": "yandex", "type": "remote", "format": "binary", "url": "https://fi.llokitty.com/geosite/yandex.srs", "download_detour": "direct" },
-      { "tag": "geoip-yandex", "type": "remote", "format": "binary", "url": "https://fi.llokitty.com/geoip/geoip-yandex.srs", "download_detour": "direct" },
-      { "tag": "kinopoisk", "type": "remote", "format": "binary", "url": "https://fi.llokitty.com/geosite/kinopoisk.srs", "download_detour": "direct" }
-    ],
+    "rule_set": [],
     "rules": [
       { "action": "sniff", "timeout": "1s" },
       { "protocol": "dns", "action": "hijack-dns" },
       { "protocol": "bittorrent", "outbound": "direct" },
       { "protocol": "quic", "port": [443], "action": "reject" },
       { "port": [25,465,587,143,993,110,995], "outbound": "direct" },
-      { "ip_cidr": ["224.0.0.0/3","ff00::/8"], "source_ip_cidr": ["224.0.0.0/3","ff00::/8"], "action": "reject" },
-      { "domain_keyword": ["habr"], "outbound": "Select" },
-      { "domain_suffix": ["reddit.com"], "domain_keyword": ["2gis","dgis"], "domain_regex": [".*\\.ru$",".*\\.su$"], "outbound": "direct" },
-      { "rule_set": ["yandex","geoip-yandex","kinopoisk","geoip-russia"], "outbound": "direct" }
+      { "ip_cidr": ["224.0.0.0/3","ff00::/8"], "source_ip_cidr": ["224.0.0.0/3","ff00::/8"], "action": "reject" }
     ]
   },
   "experimental": {

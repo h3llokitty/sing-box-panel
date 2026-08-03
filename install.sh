@@ -49,7 +49,7 @@ cleanup_failed_install() {
 
 update_existing_install() {
   echo "$(t update_started)"
-  local replace_routing=0
+  local replace_routing=0 replace_client_routing=0
   if [[ -f /opt/vpn/server-routing.json ]]; then
     printf "$(t routing_file_found)\n" "/opt/vpn/server-routing.json"
     echo "$(t routing_keep_option)"
@@ -65,8 +65,24 @@ update_existing_install() {
     replace_routing=1
   fi
 
+  if [[ -f /opt/vpn/client-routing.json ]]; then
+    printf "$(t client_routing_file_found)\n" "/opt/vpn/client-routing.json"
+    echo "$(t client_routing_keep_option)"
+    echo "$(t client_routing_replace_option)"
+    local client_routing_choice
+    read -rp "$(t prompt_choice_12_default1)" client_routing_choice
+    case "${client_routing_choice:-1}" in
+      1) replace_client_routing=0 ;;
+      2) replace_client_routing=1 ;;
+      *) echo "$(t invalid)"; return 1 ;;
+    esac
+  else
+    replace_client_routing=1
+  fi
+
   bash -n "$SCRIPT_DIR/vpn-setup.sh" "$SCRIPT_DIR/i18n.sh" "$SCRIPT_DIR/install-warp.sh"
   jq empty "$SCRIPT_DIR/templates/server-routing.json"
+  jq empty "$SCRIPT_DIR/templates/client-routing.json"
 
   local stamp backup
   stamp=$(date +%Y%m%d%H%M%S)
@@ -75,7 +91,7 @@ update_existing_install() {
   [[ -f /root/vpn-setup.sh ]] && cp -a /root/vpn-setup.sh "$backup/root/"
   [[ -f /root/i18n.sh ]] && cp -a /root/i18n.sh "$backup/root/"
   local file
-  for file in i18n.sh template.json template-legacy.json stats.proto server-template.json server-routing.json; do
+  for file in i18n.sh template.json template-legacy.json stats.proto server-template.json server-routing.json client-routing.json; do
     [[ -f "/opt/vpn/$file" ]] && cp -a "/opt/vpn/$file" "$backup/opt-vpn/"
   done
   [[ -f /etc/sing-box/config.json ]] && cp -a /etc/sing-box/config.json "$backup/config.json"
@@ -93,11 +109,17 @@ update_existing_install() {
   else
     echo "$(t routing_kept)"
   fi
+  if [[ "$replace_client_routing" == "1" ]]; then
+    install -m 0644 "$SCRIPT_DIR/templates/client-routing.json" /opt/vpn/client-routing.json
+    echo "$(t client_routing_replaced)"
+  else
+    echo "$(t client_routing_kept)"
+  fi
 
   if ! VPN_CONFIG=/etc/sing-box/vpn-panel.env /root/vpn-setup.sh --rebuild-config; then
     [[ -f "$backup/root/vpn-setup.sh" ]] && cp -a "$backup/root/vpn-setup.sh" /root/vpn-setup.sh
     [[ -f "$backup/root/i18n.sh" ]] && cp -a "$backup/root/i18n.sh" /root/i18n.sh
-    for file in i18n.sh template.json template-legacy.json stats.proto server-template.json server-routing.json; do
+    for file in i18n.sh template.json template-legacy.json stats.proto server-template.json server-routing.json client-routing.json; do
       [[ -f "$backup/opt-vpn/$file" ]] && cp -a "$backup/opt-vpn/$file" "/opt/vpn/$file"
     done
     [[ -f "$backup/config.json" ]] && cp -a "$backup/config.json" /etc/sing-box/config.json
@@ -433,13 +455,14 @@ if [[ "$RESOLVED" != "$A_IP" ]]; then
 fi
 
 step "$(t step8)"
-mkdir -p /opt/vpn/profiles /opt/vpn/traffic/daily /root/clients /etc/sing-box/clients
+mkdir -p /opt/vpn/profiles /opt/vpn/traffic/daily /etc/sing-box/clients
 
 cp "$SCRIPT_DIR/templates/template.json" /opt/vpn/template.json
 cp "$SCRIPT_DIR/templates/template-legacy.json" /opt/vpn/template-legacy.json
 cp "$SCRIPT_DIR/templates/stats.proto" /opt/vpn/stats.proto
 cp "$SCRIPT_DIR/templates/server-template.json" /opt/vpn/server-template.json
 cp "$SCRIPT_DIR/templates/server-routing.json" /opt/vpn/server-routing.json
+cp "$SCRIPT_DIR/templates/client-routing.json" /opt/vpn/client-routing.json
 
 # удобные симлинки для навигации из /opt/vpn (не меняют реальные пути в коде)
 ln -sf /etc/sing-box /opt/vpn/sing-box

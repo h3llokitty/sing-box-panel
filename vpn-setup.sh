@@ -46,10 +46,11 @@ CONFIG=$DIR/config.json
 TEMPLATE=/opt/vpn/template.json
 SERVER_TEMPLATE=/opt/vpn/server-template.json
 SERVER_ROUTING=/opt/vpn/server-routing.json
+CLIENT_ROUTING_TEMPLATE=/opt/vpn/client-routing.json
 TEMPLATE_LEGACY=/opt/vpn/template-legacy.json
 PROFILES=/opt/vpn/profiles
-CONFDIR=/root/clients
-mkdir -p "$CLI" "$PROFILES" "$CONFDIR"
+CLIENT_FILES_ROOT=/opt/vpn
+mkdir -p "$CLI" "$PROFILES"
 TRAFFIC_DIR=/opt/vpn/traffic
 TRAFFIC_DAILY="$TRAFFIC_DIR/daily"
 TRAFFIC_STATE="$TRAFFIC_DIR/state.env"
@@ -133,6 +134,58 @@ next_wg_ip() {
   used=$( { grep -rh '^IP=' "$CLI"/*.env "$WGD"/*.env 2>/dev/null || true; } | sed 's/IP=//' )
   for n in $(seq 2 254); do echo "$used" | grep -qx "$n" || { echo "$n"; return; }; done
   echo "ERR"; return 1
+}
+
+client_owner_dir() {
+  printf '%s/%s' "$CLIENT_FILES_ROOT" "$1"
+}
+
+client_wg_path() {
+  printf '%s/%s_wg.conf' "$(client_owner_dir "$1")" "$2"
+}
+
+client_routing_path() {
+  printf '%s/%s_routing.json' "$(client_owner_dir "$1")" "$2"
+}
+
+ensure_client_routing() {
+  local owner="$1" key="$2" owner_dir routing_file legacy_routing
+  owner_dir=$(client_owner_dir "$owner")
+  routing_file=$(client_routing_path "$owner" "$key")
+  legacy_routing="/root/clients/${key}_routing.json"
+  install -d -m 0700 "$owner_dir"
+  if [[ ! -f "$routing_file" ]]; then
+    if [[ -f "$legacy_routing" ]]; then
+      install -m 0600 "$legacy_routing" "$routing_file"
+      cmp -s "$legacy_routing" "$routing_file" && rm -f "$legacy_routing"
+    else
+      install -m 0600 "$CLIENT_ROUTING_TEMPLATE" "$routing_file"
+    fi
+  fi
+  printf '%s' "$routing_file"
+}
+
+remove_client_artifacts() {
+  local owner="$1" key="$2" owner_dir
+  owner_dir=$(client_owner_dir "$owner")
+  rm -f "$(client_wg_path "$owner" "$key")" "$(client_routing_path "$owner" "$key")"
+  rm -f "/root/clients/${key}.conf" "/root/clients/${key}_wg.conf" "/root/clients/${key}_routing.json"
+  rmdir "$owner_dir" 2>/dev/null || true
+}
+
+move_client_artifacts() {
+  local old_owner="$1" old_key="$2" new_owner="$3" new_key="$4"
+  local old_dir new_dir old_file new_file
+  old_dir=$(client_owner_dir "$old_owner")
+  new_dir=$(client_owner_dir "$new_owner")
+  install -d -m 0700 "$new_dir"
+  old_file=$(client_wg_path "$old_owner" "$old_key")
+  new_file=$(client_wg_path "$new_owner" "$new_key")
+  [[ -f "$old_file" ]] && mv -f "$old_file" "$new_file"
+  old_file=$(client_routing_path "$old_owner" "$old_key")
+  new_file=$(client_routing_path "$new_owner" "$new_key")
+  [[ -f "$old_file" ]] && mv -f "$old_file" "$new_file"
+  rmdir "$old_dir" 2>/dev/null || true
 }
 
 rebuild_config() {
@@ -453,7 +506,11 @@ SEL
 gen_wg_conf() {
   [[ -z "${AIPS:-}" ]] && AIPS="$AIPS_FULL"
   local caips; caips=$(echo "$AIPS" | tr -d '"')
-  local path="$CONFDIR/${KEY}.conf"
+  local owner_dir path legacy_path
+  owner_dir=$(client_owner_dir "$NAME")
+  install -d -m 0700 "$owner_dir"
+  path=$(client_wg_path "$NAME" "$KEY")
+  legacy_path="/root/clients/${KEY}.conf"
   umask 077
   cat > "$path" <<CONF
 [Interface]
@@ -469,12 +526,23 @@ AllowedIPs = ${WG_NET}.0/24, ${caips}
 Endpoint = ${A_IP}:${WG_PORT}
 PersistentKeepalive = 25
 CONF
+  chmod 0600 "$path"
+  if [[ -f "$legacy_path" ]] && cmp -s "$legacy_path" "$path"; then
+    rm -f "$legacy_path"
+    rmdir /root/clients 2>/dev/null || true
+  fi
   echo "$path"
 }
 
 gen_profile() {
-  local wg="" sel base tail proxies="" pt block first=1
-  if [[ -n "${WG_PUB:-}" ]]; then wg=$(wg_endpoint_json); fi
+  local wg="" sel base tail proxies="" pt block first=1 routing_file
+  routing_file=$(ensure_client_routing "$NAME" "$KEY")
+  if [[ -n "${WG_PUB:-}" ]]; then
+    wg=$(wg_endpoint_json)
+    gen_wg_conf >/dev/null
+  else
+    rm -f "$(client_wg_path "$NAME" "$KEY")"
+  fi
   for pt in $(client_proxy_types); do
     block=$(outbound_json_for "$pt")
     [[ $first -eq 0 ]] && proxies+=",
@@ -496,36 +564,65 @@ ${sel}"
   fi
   base="$PROFILES/${KEY}_${TOKEN}"
 
-  python3 - "$TEMPLATE" "${base}-modern.json" <<PYEOF
+  local routing_shape_error modern_new="${base}-modern.json.new"
+  routing_shape_error=$(t client_routing_invalid_shape)
+  if ! python3 - "$TEMPLATE" "$modern_new" "$routing_file" "$routing_shape_error" <<PYEOF
 import sys, json
-tmpl, out = sys.argv[1], sys.argv[2]
+tmpl, out, routing, shape_error = sys.argv[1:5]
 wg = """$wg"""; tail = """$tail"""
 s = open(tmpl).read()
 s = s.replace("__WG_ENDPOINT__", wg.strip())
 s = s.replace("__OUTBOUND_TAIL__", tail.strip())
-json.loads(s)
-open(out,"w").write(s)
+config = json.loads(s)
+with open(routing) as routing_file:
+    policy = json.load(routing_file)
+rule_sets = policy.get("rule_set", [])
+rules = policy.get("rules", [])
+if not isinstance(rule_sets, list) or not isinstance(rules, list):
+    raise ValueError(shape_error)
+config["route"]["rule_set"].extend(rule_sets)
+config["route"]["rules"].extend(rules)
+with open(out, "w") as output_file:
+    json.dump(config, output_file, indent=2)
+    output_file.write("\n")
 PYEOF
-  local modern_ok=1
-  if [[ $? -ne 0 ]]; then echo "$(t json_error_modern)"; rm -f "${base}-modern.json"; modern_ok=0
-  elif ! sing-box check -c "${base}-modern.json" >/dev/null 2>&1; then
+  then
+    echo "$(t json_error_modern)"; rm -f "$modern_new"; local modern_ok=0
+  elif ! sing-box check -c "$modern_new" >/dev/null 2>&1; then
     echo "$(t modern_check_failed)"
-    sing-box check -c "${base}-modern.json" 2>&1 | grep -v WARN | head -4
-    rm -f "${base}-modern.json"; modern_ok=0
+    sing-box check -c "$modern_new" 2>&1 | grep -v WARN | head -4 || true
+    rm -f "$modern_new"; local modern_ok=0
+  else
+    mv -f "$modern_new" "${base}-modern.json"
+    local modern_ok=1
   fi
 
-  python3 - "$TEMPLATE_LEGACY" "${base}-legacy.json" <<PYEOF
+  local legacy_new="${base}-legacy.json.new" legacy_ok=1
+  if ! python3 - "$TEMPLATE_LEGACY" "$legacy_new" "$routing_file" "$routing_shape_error" <<PYEOF
 import sys, json
-tmpl, out = sys.argv[1], sys.argv[2]
+tmpl, out, routing, shape_error = sys.argv[1:5]
 wg = """$wg"""; tail = """$tail"""
 s = open(tmpl).read()
 s = s.replace("__WG_ENDPOINT__", wg.strip())
 s = s.replace("__OUTBOUND_TAIL__", tail.strip())
-json.loads(s)
-open(out,"w").write(s)
+config = json.loads(s)
+with open(routing) as routing_file:
+    policy = json.load(routing_file)
+rule_sets = policy.get("rule_set", [])
+rules = policy.get("rules", [])
+if not isinstance(rule_sets, list) or not isinstance(rules, list):
+    raise ValueError(shape_error)
+config["route"]["rule_set"].extend(rule_sets)
+config["route"]["rules"].extend(rules)
+with open(out, "w") as output_file:
+    json.dump(config, output_file, indent=2)
+    output_file.write("\n")
 PYEOF
-  local legacy_ok=1
-  if [[ $? -ne 0 ]]; then echo "$(t json_error_legacy)"; rm -f "${base}-legacy.json"; legacy_ok=0; fi
+  then
+    echo "$(t json_error_legacy)"; rm -f "$legacy_new"; legacy_ok=0
+  else
+    mv -f "$legacy_new" "${base}-legacy.json"
+  fi
 
   if [[ $modern_ok -eq 0 && $legacy_ok -eq 0 ]]; then
     echo "$(t both_variants_failed)"; return 1
@@ -536,7 +633,7 @@ PYEOF
       [[ -f "$f" ]] && { jq . "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"; }
     done
   fi
-  chmod 644 "${base}-modern.json" "${base}-legacy.json" 2>/dev/null
+  chmod 644 "${base}-modern.json" "${base}-legacy.json" 2>/dev/null || true
 
   printf -- "$(t modern_result)\n" "$([[ $modern_ok -eq 1 ]] && t ok_word || t failed_see_above)"
   printf -- "$(t legacy_result)\n" "$([[ $legacy_ok -eq 1 ]] && t ok_word || t no_word)"
@@ -559,6 +656,28 @@ gen_profile_quiet() {  # $1 = ключ клиента, только пересо
   gen_profile
 }
 
+rebuild_all_profiles() {
+  ensure_base
+  local f key total=0 ok=0 failed=0 output
+  echo "$(t profiles_rebuild_header)"
+  for f in "$CLI"/*.env; do
+    [[ -e "$f" ]] || continue
+    key=$(basename "$f" .env)
+    total=$((total+1))
+    if output=$(gen_profile_quiet "$key" 2>&1); then
+      printf -- "$(t profile_rebuild_ok)\n" "$key"
+      ok=$((ok+1))
+    else
+      printf -- "$(t profile_rebuild_failed)\n" "$key"
+      [[ -n "$output" ]] && printf '%s\n' "$output" | tail -4
+      failed=$((failed+1))
+    fi
+  done
+  printf -- "$(t profiles_rebuild_summary)\n" "$ok" "$total"
+  echo "$(t profiles_rebuild_no_restart)"
+  [[ $failed -eq 0 ]]
+}
+
 emit_client() {
   source "$BASE"
   NAME=""; PROFILE=""; WG_PRIV=""; WG_PUB=""; IP=""; PASS=""; VLESS_UUID=""; AIPS=""; TOKEN=""
@@ -574,6 +693,10 @@ emit_client() {
     wg_endpoint_json | (jq . 2>/dev/null || cat)
     echo
   fi
+  local routing_file
+  routing_file=$(ensure_client_routing "$NAME" "$KEY")
+  printf -- "$(t client_routing_label)\n" "$routing_file"
+  echo
   local pt
   for pt in $(client_proxy_types); do
     if [[ "$pt" == "vless" ]]; then
@@ -746,7 +869,9 @@ revoke_client() {
     [[ "${a,,}" == "y" ]] || { echo "$(t cancelled)"; return; }
     for ((j=0; j<${#DEVS[@]}; j++)); do
       local pr="${DEVPROF[$j]}"
-      rm -f "${DEVS[$j]}" "$PROFILES/${owner}_${pr}_"*.json "$CONFDIR/${owner}_${pr}.conf"
+      local owner_key="${owner}_${pr}"
+      rm -f "${DEVS[$j]}" "$PROFILES/${owner_key}_"*.json
+      remove_client_artifacts "$owner" "$owner_key"
     done
     printf -- "$(t owner_deleted)\n" "$owner"
   else
@@ -754,7 +879,8 @@ revoke_client() {
     local key; key=$(basename "${DEVS[$((d-1))]}" .env)
     read -rp "$(printf -- "$(t prompt_delete_device)" "$key")" a
     [[ "${a,,}" == "y" ]] || { echo "$(t cancelled)"; return; }
-    rm -f "$CLI/$key.env" "$PROFILES/${key}_"*.json "$CONFDIR/${key}.conf"
+    rm -f "$CLI/$key.env" "$PROFILES/${key}_"*.json
+    remove_client_artifacts "$owner" "$key"
     printf -- "$(t device_deleted)\n" "$key"
   fi
   rebuild_config
@@ -932,7 +1058,8 @@ service_menu() {
   echo "$(t svc_opt_traffic)"
   echo "$(t svc_opt_transport)"
   echo "$(t svc_opt_reality)"
-  local c; read -rp "$(t prompt_choice_17)" c
+  echo "$(t svc_opt_rebuild_profiles)"
+  local c; read -rp "$(t prompt_choice_18)" c
   case "$c" in
     1)
       list_names
@@ -972,6 +1099,9 @@ service_menu() {
       ;;
     7)
       reality_domains_menu
+      ;;
+    8)
+      rebuild_all_profiles || true
       ;;
     *) echo "$(t invalid)" ;;
   esac
@@ -1147,7 +1277,8 @@ edit_client() {
       sed -i "s/^NAME=\".*\"/NAME=\"$new_name\"/" "$f"
       if [[ "$newkey" != "$oldkey" ]]; then
         mv "$f" "$CLI/$newkey.env"
-        rm -f "$PROFILES/${oldkey}_"*.json "$CONFDIR/${oldkey}.conf"
+        rm -f "$PROFILES/${oldkey}_"*.json
+        move_client_artifacts "$owner" "$oldkey" "$new_name" "$newkey"
       fi
       renamed=$((renamed+1))
     done
@@ -1203,7 +1334,7 @@ edit_client() {
       OWG_PRIV=$(wg genkey); OWG_PUB=$(echo "$OWG_PRIV" | wg pubkey); OIP="$newip"
     elif [[ $want_wg -eq 0 ]]; then
       OWG_PRIV=""; OWG_PUB=""; OIP=""; OAIPS=""
-      rm -f "$CONFDIR/${oldkey}.conf"
+      rm -f "$(client_wg_path "$ONAME" "$oldkey")" "/root/clients/${oldkey}.conf"
     fi
 
     if [[ $want_proxy -eq 1 && -z "$OPASS" ]]; then
@@ -1235,7 +1366,8 @@ edit_client() {
   if [[ "$newkey" != "$oldkey" ]]; then
     mv "$CLI/$newkey.env.tmp" "$CLI/$newkey.env"
     rm -f "$oldfile"
-    rm -f "$PROFILES/${oldkey}_"*.json "$CONFDIR/${oldkey}.conf"
+    rm -f "$PROFILES/${oldkey}_"*.json
+    move_client_artifacts "$ONAME" "$oldkey" "$new_name" "$newkey"
   else
     mv "$CLI/$newkey.env.tmp" "$CLI/$newkey.env"
   fi
@@ -1252,6 +1384,10 @@ if [[ "${1:-}" == "--cron-traffic" ]]; then
 fi
 if [[ "${1:-}" == "--rebuild-config" ]]; then
   rebuild_config
+  exit 0
+fi
+if [[ "${1:-}" == "--rebuild-profiles" ]]; then
+  rebuild_all_profiles
   exit 0
 fi
 

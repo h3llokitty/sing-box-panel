@@ -64,6 +64,9 @@ When install.sh detects /etc/sing-box/.install-done, it does not run cleanup.
 It offers an in-place Git update, a separately confirmed full reinstall, or cancel.
 During an in-place update, an existing /opt/vpn/server-routing.json can be
 kept (the default) or replaced explicitly with the standard file from Git.
+The same independent choice is offered for the default
+`/opt/vpn/client-routing.json`. Per-device routing files are never overwritten
+by an update.
 Every update creates a rollback backup under /root/vpn-update-backup-*.
 
 ## Optional Cloudflare WARP outbound
@@ -103,6 +106,19 @@ Main menu:
    - traffic statistics (today / 7 days / all-time)
    - manage the A→B transport (direct / Hysteria2 / VLESS+Reality)
    - manage Reality masking domains (list / add / remove)
+   - rebuild remote client profiles without restarting sing-box or nginx
+
+Each owner has a private directory under `/opt/vpn`. WireGuard configuration
+and editable per-device routing are stored together, for example:
+
+```text
+/opt/vpn/kitty/kitty_mac_wg.conf
+/opt/vpn/kitty/kitty_mac_routing.json
+```
+
+Run `/root/sb-panel --rebuild-profiles` after editing routing manually, or use
+the corresponding service-menu command. Published modern/legacy profile URLs
+do not change.
 
 ## Server B requirements
 
@@ -120,6 +136,7 @@ config.env.example      — reference list of parameters (install.sh asks for th
 templates/
 template.json           — client profile for sing-box 1.12+ (modern)
 template-legacy.json     — client profile for sing-box 1.11.x (legacy)
+client-routing.json      — default route rule sets and policy rules for new clients
 server-template.json     — technical server configuration template
 server-routing.json      — server route rule sets and policy rules
 install-warp.sh        — optional localized Cloudflare WARP installer
