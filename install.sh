@@ -22,6 +22,138 @@ DONE_MARKER=/etc/sing-box/.install-done
 
 step() { echo; echo "=================================================="; echo "$1"; echo "=================================================="; }
 
+RULESET_DEFAULT_BASE="https://fi.llokitty.com"
+RULESET_UPSTREAM_BASE="https://unicorns.kz/sources"
+RULESET_REQUIRED_PATHS=(
+  "geoip/geoip-ru.srs"
+  "geoip/geoip-yandex.srs"
+  "geosite/yandex.srs"
+  "geosite/kinopoisk.srs"
+)
+
+normalize_ruleset_base() {
+  local value="${1:-}"
+  value="${value#http://}"
+  value="${value#https://}"
+  value="${value%/}"
+  [[ "$value" =~ ^[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~/-]+)?$ ]] || return 1
+  [[ "$value" != *".."* && "$value" != *"//"* ]] || return 1
+  printf 'https://%s' "$value"
+}
+
+ruleset_domain_from_base() {
+  local authority="${1#https://}"
+  authority="${authority%%/*}"
+  printf '%s' "${authority%%:*}"
+}
+
+ruleset_path_from_base() {
+  local rest="${1#https://}"
+  if [[ "$rest" == */* ]]; then
+    printf '/%s' "${rest#*/}"
+  fi
+}
+
+ruleset_base_from_routing() {
+  local file="${1:-}" url
+  [[ -f "$file" ]] || return 1
+  url=$(jq -r '.rule_set[]?.url // empty' "$file" 2>/dev/null | head -1)
+  [[ -n "$url" ]] || return 1
+  url="${url%%/geoip/*}"
+  url="${url%%/geosite/*}"
+  normalize_ruleset_base "$url"
+}
+
+render_routing_template() {
+  local source_file="$1" target_file="$2" base_url="$3" content
+  content=$(<"$source_file")
+  content="${content//__RULESET_BASE_URL__/$base_url}"
+  printf '%s\n' "$content" > "$target_file"
+}
+
+validate_ruleset_storage() {
+  local base_url="$1" relative
+  for relative in "${RULESET_REQUIRED_PATHS[@]}"; do
+    if ! curl -4 -fsSL --max-time 20 -o /dev/null "${base_url}/${relative}"; then
+      printf -- "$(t ruleset_file_unavailable)\n" "${base_url}/${relative}" >&2
+      return 1
+    fi
+  done
+}
+
+download_local_rulesets() {
+  local relative target
+  install -d -m 0755 /var/www/sources/geoip /var/www/sources/geosite
+  for relative in "${RULESET_REQUIRED_PATHS[@]}"; do
+    target="/var/www/sources/${relative}"
+    curl -4 -fsSL --max-time 120 "${RULESET_UPSTREAM_BASE}/${relative}" -o "${target}.new"
+    chmod 0644 "${target}.new"
+    mv -f "${target}.new" "$target"
+  done
+}
+
+write_local_ruleset_nginx_config() {
+  local target_file="$1" domain="$2" base_path="$3" internal_port="$4" location_block
+  if [[ -n "$base_path" ]]; then
+    location_block="location = ${base_path} { return 301 ${base_path}/; }
+    location ^~ ${base_path}/ {
+        alias /var/www/sources/;
+        autoindex on;
+        autoindex_exact_size off;
+        autoindex_localtime on;
+    }"
+  else
+    location_block="location / {
+        root /var/www/sources;
+        autoindex on;
+        autoindex_exact_size off;
+        autoindex_localtime on;
+        try_files \$uri \$uri/ =404;
+    }"
+  fi
+
+  cat > "$target_file" <<NGINX
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${domain};
+    location / { return 301 https://\$host\$request_uri; }
+}
+
+server {
+    listen 127.0.0.1:${internal_port} ssl;
+    server_name ${domain};
+    ssl_certificate /etc/letsencrypt/live/${domain}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    access_log /var/log/nginx/rulesets_access.log;
+    ${location_block}
+}
+NGINX
+}
+
+configure_local_ruleset_storage() {
+  local domain="$1" base_path="$2"
+  install -d -m 0755 /var/www/letsencrypt /etc/nginx/sites-available /etc/nginx/sites-enabled
+
+  systemctl stop nginx 2>/dev/null || true
+  certbot certonly --standalone --non-interactive --agree-tos \
+    --preferred-challenges http --email "$ACME_EMAIL" -d "$domain"
+
+  write_local_ruleset_nginx_config \
+    /etc/nginx/sites-available/rulesets "$domain" "$base_path" "$FILES_INTERNAL_PORT"
+  ln -sfn /etc/nginx/sites-available/rulesets /etc/nginx/sites-enabled/rulesets
+
+  install -d -m 0755 /etc/letsencrypt/renewal-hooks/deploy
+  cat > /etc/letsencrypt/renewal-hooks/deploy/reload-nginx <<'HOOK'
+#!/usr/bin/env bash
+set -e
+nginx -t
+systemctl reload nginx
+HOOK
+  chmod 0755 /etc/letsencrypt/renewal-hooks/deploy/reload-nginx
+}
+
 cleanup_failed_install() {
   echo
   echo "=================================================="
@@ -38,6 +170,7 @@ cleanup_failed_install() {
   rm -f /etc/apt/sources.list.d/cloudflare-client.list
   rm -f /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
   rm -f /etc/nginx/sites-enabled/profiles /etc/nginx/sites-available/profiles
+  rm -f /etc/nginx/sites-enabled/rulesets /etc/nginx/sites-available/rulesets
   rm -f /etc/nginx/conf.d/singbox-ua.conf
   rm -f /etc/systemd/system/sing-box.service
   rm -f /etc/systemd/system/sing-box.service.d/warp.conf
@@ -49,7 +182,13 @@ cleanup_failed_install() {
 
 update_existing_install() {
   echo "$(t update_started)"
-  local replace_routing=0 replace_client_routing=0
+  local replace_routing=0 replace_client_routing=0 ruleset_base=""
+  if [[ -f /etc/sing-box/vpn-panel.env ]]; then
+    ruleset_base=$(set +u; source /etc/sing-box/vpn-panel.env; printf '%s' "${RULESET_BASE_URL:-}")
+  fi
+  if ! ruleset_base=$(normalize_ruleset_base "$ruleset_base" 2>/dev/null); then
+    ruleset_base=$(ruleset_base_from_routing /opt/vpn/client-routing.json 2>/dev/null || printf '%s' "$RULESET_DEFAULT_BASE")
+  fi
   if [[ -f /opt/vpn/server-routing.json ]]; then
     printf "$(t routing_file_found)\n" "/opt/vpn/server-routing.json"
     echo "$(t routing_keep_option)"
@@ -104,13 +243,15 @@ update_existing_install() {
   install -m 0644 "$SCRIPT_DIR/templates/stats.proto" /opt/vpn/stats.proto
   install -m 0644 "$SCRIPT_DIR/templates/server-template.json" /opt/vpn/server-template.json
   if [[ "$replace_routing" == "1" ]]; then
-    install -m 0644 "$SCRIPT_DIR/templates/server-routing.json" /opt/vpn/server-routing.json
+    render_routing_template "$SCRIPT_DIR/templates/server-routing.json" /opt/vpn/server-routing.json "$ruleset_base"
+    chmod 0644 /opt/vpn/server-routing.json
     echo "$(t routing_replaced)"
   else
     echo "$(t routing_kept)"
   fi
   if [[ "$replace_client_routing" == "1" ]]; then
-    install -m 0644 "$SCRIPT_DIR/templates/client-routing.json" /opt/vpn/client-routing.json
+    render_routing_template "$SCRIPT_DIR/templates/client-routing.json" /opt/vpn/client-routing.json "$ruleset_base"
+    chmod 0644 /opt/vpn/client-routing.json
     echo "$(t client_routing_replaced)"
   else
     echo "$(t client_routing_kept)"
@@ -177,7 +318,7 @@ trap 'if [[ -f "$MARKER" ]]; then cleanup_failed_install; fi' ERR
 step "$(t step1)"
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-  curl git build-essential wireguard-tools nginx libnginx-mod-stream jq qrencode python3 openssl dnsutils
+  curl git build-essential wireguard-tools nginx libnginx-mod-stream jq qrencode python3 openssl dnsutils certbot
 
 step "$(t step2)"
 if ! command -v go >/dev/null 2>&1; then
@@ -314,6 +455,50 @@ if [[ ! -f "$CONFIG_ENV" ]]; then
   read -rp "$(t prompt_vless_dest_a)" VLESS_DEST
   VLESS_SNI="$VLESS_DEST"
 
+  while true; do
+    echo
+    echo "$(t ruleset_intro)"
+    read -rp "$(printf "$(t prompt_ruleset_base)" "$RULESET_DEFAULT_BASE")" RULESET_BASE_INPUT
+    RULESET_BASE_INPUT=${RULESET_BASE_INPUT:-$RULESET_DEFAULT_BASE}
+    if ! RULESET_BASE_URL=$(normalize_ruleset_base "$RULESET_BASE_INPUT"); then
+      echo "$(t ruleset_base_invalid)"
+      continue
+    fi
+
+    echo "$(t ruleset_storage_question)"
+    echo "$(t ruleset_storage_existing_option)"
+    echo "$(t ruleset_storage_local_option)"
+    read -rp "$(t prompt_choice_12_default1)" RULESET_STORAGE_CHOICE
+    case "${RULESET_STORAGE_CHOICE:-1}" in
+      1)
+        RULESET_STORAGE_LOCAL=0
+        FILES_DOMAIN=""
+        FILES_INTERNAL_PORT=9443
+        echo "$(t ruleset_checking_existing)"
+        if validate_ruleset_storage "$RULESET_BASE_URL"; then
+          echo "$(t ruleset_existing_ready)"
+          break
+        fi
+        echo "$(t ruleset_existing_retry)"
+        ;;
+      2)
+        if [[ "${RULESET_BASE_URL#https://}" == *:* ]]; then
+          echo "$(t ruleset_local_port_invalid)"
+          continue
+        fi
+        RULESET_STORAGE_LOCAL=1
+        FILES_DOMAIN=$(ruleset_domain_from_base "$RULESET_BASE_URL")
+        if [[ "$FILES_DOMAIN" == "$A_DOMAIN" ]]; then
+          echo "$(t ruleset_local_domain_conflict)"
+          continue
+        fi
+        FILES_INTERNAL_PORT=9443
+        break
+        ;;
+      *) echo "$(t invalid)" ;;
+    esac
+  done
+
   cat > "$CONFIG_ENV" <<EOF
 A_IP="$A_IP"
 A_DOMAIN="$A_DOMAIN"
@@ -338,8 +523,10 @@ AVAILABLE_PROXY_TYPES="hy2 vless"
 WARP_ENABLED=0
 WARP_PORT=40000
 WARP_TAG="WARP"
-FILES_DOMAIN=""
-FILES_INTERNAL_PORT=9443
+RULESET_BASE_URL="$RULESET_BASE_URL"
+RULESET_STORAGE_LOCAL=$RULESET_STORAGE_LOCAL
+FILES_DOMAIN="$FILES_DOMAIN"
+FILES_INTERNAL_PORT=$FILES_INTERNAL_PORT
 LANG_CODE="$LANG_CODE"
 EOF
   chmod 600 "$CONFIG_ENV"
@@ -359,6 +546,19 @@ do
     sed -i "/^${OLD_KEY}=/d" "$CONFIG_ENV"
   fi
 done
+
+if ! grep -q '^RULESET_BASE_URL=' "$CONFIG_ENV"; then
+  EXISTING_RULESET_BASE=$(ruleset_base_from_routing /opt/vpn/client-routing.json 2>/dev/null || printf '%s' "$RULESET_DEFAULT_BASE")
+  printf 'RULESET_BASE_URL="%s"\n' "$EXISTING_RULESET_BASE" >> "$CONFIG_ENV"
+fi
+if ! grep -q '^RULESET_STORAGE_LOCAL=' "$CONFIG_ENV"; then
+  EXISTING_FILES_DOMAIN=$(set +u; source "$CONFIG_ENV"; printf '%s' "${FILES_DOMAIN:-}")
+  if [[ -n "$EXISTING_FILES_DOMAIN" ]]; then
+    echo 'RULESET_STORAGE_LOCAL=1' >> "$CONFIG_ENV"
+  else
+    echo 'RULESET_STORAGE_LOCAL=0' >> "$CONFIG_ENV"
+  fi
+fi
 
 if [[ "${B_NEEDS_INSTALL:-0}" == "1" ]]; then
   echo
@@ -456,15 +656,40 @@ if [[ "$RESOLVED" != "$A_IP" ]]; then
   [[ "${cont,,}" == "y" ]] || { echo "$(t aborted)"; exit 1; }
 fi
 
+if [[ "${RULESET_STORAGE_LOCAL:-0}" == "1" ]]; then
+  RULESET_RESOLVED=$(dig +short "$FILES_DOMAIN" @1.1.1.1 2>/dev/null | tail -1)
+  if [[ "$RULESET_RESOLVED" != "$A_IP" ]]; then
+    printf -- "$(t ruleset_dns_mismatch)\n" "$FILES_DOMAIN" "$RULESET_RESOLVED" "$A_IP"
+    exit 1
+  fi
+fi
+
 step "$(t step8)"
 mkdir -p /opt/vpn/profiles /opt/vpn/traffic/daily /etc/sing-box/clients
+
+if [[ "${RULESET_STORAGE_LOCAL:-0}" == "1" ]]; then
+  echo "$(t ruleset_local_installing)"
+  download_local_rulesets
+  RULESET_BASE_PATH=$(ruleset_path_from_base "$RULESET_BASE_URL")
+  configure_local_ruleset_storage "$FILES_DOMAIN" "$RULESET_BASE_PATH"
+  nginx -t
+  systemctl start nginx
+  for RULESET_RELATIVE in "${RULESET_REQUIRED_PATHS[@]}"; do
+    curl -4 -fsSL --max-time 20 \
+      --resolve "${FILES_DOMAIN}:${FILES_INTERNAL_PORT}:127.0.0.1" \
+      -o /dev/null \
+      "https://${FILES_DOMAIN}:${FILES_INTERNAL_PORT}${RULESET_BASE_PATH}/${RULESET_RELATIVE}"
+  done
+  echo "$(t ruleset_local_ready)"
+fi
 
 cp "$SCRIPT_DIR/templates/template.json" /opt/vpn/template.json
 cp "$SCRIPT_DIR/templates/template-legacy.json" /opt/vpn/template-legacy.json
 cp "$SCRIPT_DIR/templates/stats.proto" /opt/vpn/stats.proto
 cp "$SCRIPT_DIR/templates/server-template.json" /opt/vpn/server-template.json
-cp "$SCRIPT_DIR/templates/server-routing.json" /opt/vpn/server-routing.json
-cp "$SCRIPT_DIR/templates/client-routing.json" /opt/vpn/client-routing.json
+render_routing_template "$SCRIPT_DIR/templates/server-routing.json" /opt/vpn/server-routing.json "$RULESET_BASE_URL"
+render_routing_template "$SCRIPT_DIR/templates/client-routing.json" /opt/vpn/client-routing.json "$RULESET_BASE_URL"
+chmod 0644 /opt/vpn/server-routing.json /opt/vpn/client-routing.json
 
 # удобные симлинки для навигации из /opt/vpn (не меняют реальные пути в коде)
 ln -sf /etc/sing-box /opt/vpn/sing-box

@@ -4,28 +4,28 @@
       "tag": "geoip-russia",
       "type": "remote",
       "format": "binary",
-      "url": "https://fi.llokitty.com/geoip/geoip-ru.srs",
+      "url": "__RULESET_BASE_URL__/geoip/geoip-ru.srs",
       "download_detour": "direct"
     },
     {
       "tag": "yandex",
       "type": "remote",
       "format": "binary",
-      "url": "https://fi.llokitty.com/geosite/yandex.srs",
+      "url": "__RULESET_BASE_URL__/geosite/yandex.srs",
       "download_detour": "direct"
     },
     {
       "tag": "geoip-yandex",
       "type": "remote",
       "format": "binary",
-      "url": "https://fi.llokitty.com/geoip/geoip-yandex.srs",
+      "url": "__RULESET_BASE_URL__/geoip/geoip-yandex.srs",
       "download_detour": "direct"
     },
     {
       "tag": "kinopoisk",
       "type": "remote",
       "format": "binary",
-      "url": "https://fi.llokitty.com/geosite/kinopoisk.srs",
+      "url": "__RULESET_BASE_URL__/geosite/kinopoisk.srs",
       "download_detour": "direct"
     }
   ],

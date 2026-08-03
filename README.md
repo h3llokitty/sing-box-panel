@@ -33,9 +33,17 @@ you'll be asked to choose a language on first run. It will then ask for:
 - server B's domain, port, and password (or generate a new server B setup —
   see below)
 - the masking site for VLESS+Reality (see below)
+- the base URL for rule sets and whether it is already available or should be
+  hosted on server A
 
 The installation compiles sing-box from source with `with_v2ray_api` support
 (required for per-client traffic statistics) — this takes 5-15 minutes.
+
+The rule-set base URL must expose `geoip/` and `geosite/` directories. When
+local hosting is selected, the installer downloads the four standard rule
+sets, obtains a separate TLS certificate, serves them through loopback nginx,
+and adds their domain to the public port 443 SNI multiplexer. An external
+storage choice is accepted only after all four required files are reachable.
 
 If server B doesn't exist yet, `install.sh` will generate a ready-to-run
 `install-b.sh` script and print a `curl | sudo bash` command to deploy it —
