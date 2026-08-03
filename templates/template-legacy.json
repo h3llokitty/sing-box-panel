@@ -30,7 +30,7 @@
     },
     "dns": {
         "servers": [
-            { "address": "tcp://1.1.1.1", "address_resolver": "dns-local", "strategy": "prefer_ipv4", "tag": "dns-remote", "detour": "Select" },
+            { "address": "tcp://1.1.1.1", "address_resolver": "dns-local", "strategy": "ipv4_only", "tag": "dns-remote", "detour": "Select" },
             { "address": "8.8.8.8", "detour": "direct", "tag": "dns-local" },
             { "address": "rcode://success", "tag": "dns-block" }
         ],
@@ -40,7 +40,7 @@
         ],
         "final": "dns-local",
         "reverse_mapping": true,
-        "strategy": "prefer_ipv4",
+        "strategy": "ipv4_only",
         "independent_cache": true
     },
     "inbounds": [
@@ -51,6 +51,6 @@
             "auto_route": true, "strict_route": true,
             "endpoint_independent_nat": true
         },
-        { "domain_strategy": "prefer_ipv4", "listen": "127.0.0.1", "listen_port": 2334, "sniff": true, "sniff_override_destination": false, "tag": "mixed-in", "type": "mixed" }
+        { "domain_strategy": "ipv4_only", "listen": "127.0.0.1", "listen_port": 2334, "sniff": true, "sniff_override_destination": false, "tag": "mixed-in", "type": "mixed" }
     ]
 }
