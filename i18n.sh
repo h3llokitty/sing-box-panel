@@ -188,8 +188,8 @@ T[ru_rules_disabled_option.ru]="  1) нет (по умолчанию)"
 T[ru_rules_enabled_option.en]="  2) yes"
 T[ru_rules_enabled_option.ru]="  2) да"
 
-T[ruleset_intro.en]="Rule-set storage (the base URL must contain geoip/geoip-ru.srs):"
-T[ruleset_intro.ru]="Хранилище rule-set (в базовом URL должен находиться geoip/geoip-ru.srs):"
+T[ruleset_intro.en]="Rule-set source (the base URL must contain geoip/ and geosite/ directories):"
+T[ruleset_intro.ru]="Источник rule-set (базовый URL должен содержать каталоги geoip/ и geosite/):"
 
 T[prompt_ruleset_base.en]="  Rule-set base URL [%s]: "
 T[prompt_ruleset_base.ru]="  Базовый URL rule-set [%s]: "
@@ -197,50 +197,20 @@ T[prompt_ruleset_base.ru]="  Базовый URL rule-set [%s]: "
 T[ruleset_base_invalid.en]="Invalid URL. Enter a domain or an HTTPS URL without a query or fragment."
 T[ruleset_base_invalid.ru]="Некорректный URL. Укажите домен или HTTPS URL без query-параметров и фрагмента."
 
-T[ruleset_storage_question.en]="Where is this storage located?"
-T[ruleset_storage_question.ru]="Где расположено это хранилище?"
-
-T[ruleset_storage_existing_option.en]="  1) it is already available (default)"
-T[ruleset_storage_existing_option.ru]="  1) оно уже доступно (по умолчанию)"
-
-T[ruleset_storage_local_option.en]="  2) create and host it on this server"
-T[ruleset_storage_local_option.ru]="  2) создать и разместить его на этом сервере"
-
 T[ruleset_checking_existing.en]="Checking the required rule-set files..."
 T[ruleset_checking_existing.ru]="Проверка обязательных файлов rule-set..."
 
-T[ruleset_existing_ready.en]="The external rule-set storage is available."
-T[ruleset_existing_ready.ru]="Внешнее хранилище rule-set доступно."
+T[ruleset_existing_ready.en]="The rule-set source is available."
+T[ruleset_existing_ready.ru]="Источник rule-set доступен."
 
-T[ruleset_existing_retry.en]="The storage is incomplete or unavailable. Enter another URL or create it locally."
-T[ruleset_existing_retry.ru]="Хранилище недоступно или содержит не все файлы. Укажите другой URL либо создайте его локально."
+T[ruleset_existing_retry.en]="The rule-set source is unavailable or incomplete. Enter another URL."
+T[ruleset_existing_retry.ru]="Источник rule-set недоступен или неполон. Укажите другой URL."
 
 T[ruleset_file_unavailable.en]="Required rule-set file is unavailable: %s"
 T[ruleset_file_unavailable.ru]="Недоступен обязательный файл rule-set: %s"
 
 T[ruleset_file_invalid.en]="The downloaded rule-set file is not a valid sing-box binary rule set: %s"
 T[ruleset_file_invalid.ru]="Загруженный файл не является корректным бинарным rule-set sing-box: %s"
-
-T[ruleset_bundled_missing.en]="The bundled geoip-ru rule set is missing: %s"
-T[ruleset_bundled_missing.ru]="В комплекте установки отсутствует rule-set geoip-ru: %s"
-
-T[ruleset_bundled_invalid.en]="The bundled geoip-ru rule set is invalid: %s"
-T[ruleset_bundled_invalid.ru]="Встроенный rule-set geoip-ru повреждён или имеет неверный формат: %s"
-
-T[ruleset_local_port_invalid.en]="A local rule-set URL must use the standard HTTPS port 443; do not specify a port."
-T[ruleset_local_port_invalid.ru]="Локальный URL rule-set должен использовать стандартный HTTPS-порт 443; не указывайте порт вручную."
-
-T[ruleset_local_domain_conflict.en]="Local rule-set storage needs its own domain; it cannot use A_DOMAIN."
-T[ruleset_local_domain_conflict.ru]="Локальному хранилищу rule-set нужен отдельный домен; использовать A_DOMAIN нельзя."
-
-T[ruleset_dns_mismatch.en]="Rule-set domain %s currently resolves to '%s', not to this server (%s). Configure its A record and run the installer again."
-T[ruleset_dns_mismatch.ru]="Домен rule-set %s сейчас указывает на '%s', а не на этот сервер (%s). Настройте A-запись и снова запустите установщик."
-
-T[ruleset_local_installing.en]="Publishing the bundled geoip-ru rule set and obtaining a TLS certificate..."
-T[ruleset_local_installing.ru]="Публикация встроенного rule-set geoip-ru и получение TLS-сертификата..."
-
-T[ruleset_local_ready.en]="Local rule-set storage is ready."
-T[ruleset_local_ready.ru]="Локальное хранилище rule-set готово."
 
 T[config_written.en]="Configuration written to %s"
 T[config_written.ru]="Конфигурация записана в %s"

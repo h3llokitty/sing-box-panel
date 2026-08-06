@@ -593,7 +593,22 @@ wg = """$wg"""; tail = """$tail"""
 s = open(tmpl).read()
 s = s.replace("__WG_ENDPOINT__", wg.strip())
 s = s.replace("__OUTBOUND_TAIL__", tail.strip())
+s = s.replace("__A_DOMAIN__", """$A_DOMAIN""")
+s = s.replace("__A_IP__", """$A_IP""")
+s = s.replace("__VLESS_DEST__", """$VLESS_DEST""")
+s = s.replace("__CACHE_ID__", """${KEY}_${TOKEN}""")
 config = json.loads(s)
+dns_domains = config["dns"]["rules"][0].setdefault("domain", [])
+for domain in ("""$A_DOMAIN""", """$VLESS_DEST"""):
+    if domain and domain not in dns_domains:
+        dns_domains.append(domain)
+for outbound in config["outbounds"]:
+    if outbound.get("type") in ("urltest", "selector"):
+        values = outbound.get("outbounds", [])
+        wg_tags = [tag for tag in values if tag.endswith("_wg")]
+        automatic = [tag for tag in values if tag == "auto"]
+        remaining = [tag for tag in values if tag not in wg_tags and tag != "auto"]
+        outbound["outbounds"] = remaining + wg_tags + automatic
 with open(routing) as routing_file:
     policy = json.load(routing_file)
 rule_sets = policy.get("rule_set", [])
@@ -625,7 +640,22 @@ wg = """$wg"""; tail = """$tail"""
 s = open(tmpl).read()
 s = s.replace("__WG_ENDPOINT__", wg.strip())
 s = s.replace("__OUTBOUND_TAIL__", tail.strip())
+s = s.replace("__A_DOMAIN__", """$A_DOMAIN""")
+s = s.replace("__A_IP__", """$A_IP""")
+s = s.replace("__VLESS_DEST__", """$VLESS_DEST""")
+s = s.replace("__CACHE_ID__", """${KEY}_${TOKEN}""")
 config = json.loads(s)
+dns_domains = config["dns"]["rules"][0].setdefault("domain", [])
+for domain in ("""$A_DOMAIN""", """$VLESS_DEST"""):
+    if domain and domain not in dns_domains:
+        dns_domains.append(domain)
+for outbound in config["outbounds"]:
+    if outbound.get("type") in ("urltest", "selector"):
+        values = outbound.get("outbounds", [])
+        wg_tags = [tag for tag in values if tag.endswith("_wg")]
+        automatic = [tag for tag in values if tag == "auto"]
+        remaining = [tag for tag in values if tag not in wg_tags and tag != "auto"]
+        outbound["outbounds"] = remaining + wg_tags + automatic
 with open(routing) as routing_file:
     policy = json.load(routing_file)
 rule_sets = policy.get("rule_set", [])

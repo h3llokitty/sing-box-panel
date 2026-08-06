@@ -6,12 +6,15 @@
   ],
   "route": {
     "auto_detect_interface": true,
-    "default_domain_resolver": "dns-local",
+    "default_domain_resolver": { "server": "dns-local", "strategy": "prefer_ipv4" },
     "final": "Select",
     "rule_set": [],
     "rules": [
-      { "action": "sniff", "timeout": "1s" },
-      { "protocol": "dns", "action": "hijack-dns" },
+      { "inbound": ["tun-in","mixed-in"], "action": "resolve", "strategy": "prefer_ipv4" },
+      { "inbound": ["dns-in"], "action": "route-options", "override_address": "8.8.8.8", "override_port": 53 },
+      { "inbound": ["tun-in","mixed-in"], "port": [53], "action": "hijack-dns" },
+      { "inbound": ["dns-in"], "action": "hijack-dns" },
+      { "inbound": ["tun-in","mixed-in"], "action": "sniff", "timeout": "1s" },
       { "protocol": "bittorrent", "outbound": "direct" },
       { "protocol": "quic", "port": [443], "action": "reject" },
       { "port": [25,465,587,143,993,110,995], "outbound": "direct" },
@@ -19,23 +22,24 @@
     ]
   },
   "experimental": {
-    "clash_api": { "external_controller": "127.0.0.1:9090" },
-    "cache_file": { "enabled": true, "path": "cache.db", "store_fakeip": true }
+    "clash_api": { "external_controller": "127.0.0.1:9090", "external_ui_download_url": "https://github.com/MetaCubeX/Yacd-meta/archive/gh-pages.zip" },
+    "cache_file": { "enabled": true, "path": "cache.db", "cache_id": "__CACHE_ID__", "store_fakeip": true }
   },
   "dns": {
     "servers": [
       { "type": "tcp", "tag": "dns-remote", "server": "1.1.1.1", "detour": "Select" },
-      { "type": "udp", "tag": "dns-local", "server": "8.8.8.8" }
+      { "type": "tcp", "tag": "dns-local", "server": "8.8.8.8" }
     ],
     "rules": [
-      { "domain": ["github.com","githubusercontent.com","raw.githubusercontent.com"], "server": "dns-local" }
+      { "domain": ["github.com","githubusercontent.com","raw.githubusercontent.com","1.1.1.1","__A_DOMAIN__","__VLESS_DEST__"], "server": "dns-local" }
     ],
     "final": "dns-local",
     "reverse_mapping": true,
-    "strategy": "ipv4_only"
+    "strategy": "prefer_ipv4"
   },
   "inbounds": [
-    { "type": "tun", "tag": "tun-in", "interface_name": "tun0", "address": ["172.19.0.1/30"], "mtu": 9000, "auto_route": true, "strict_route": true, "endpoint_independent_nat": true },
+    { "listen": "127.0.0.1", "listen_port": 6450, "tag": "dns-in", "type": "direct" },
+    { "type": "tun", "tag": "tun-in", "interface_name": "tun0", "address": ["172.19.0.1/30"], "mtu": 9000, "auto_route": true, "strict_route": true, "route_exclude_address": ["__A_IP__/32"], "endpoint_independent_nat": true },
     { "listen": "127.0.0.1", "listen_port": 2334, "tag": "mixed-in", "type": "mixed" }
   ]
 }
