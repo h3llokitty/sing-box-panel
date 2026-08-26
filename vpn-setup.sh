@@ -1159,6 +1159,175 @@ PYEOF
   [[ $total -gt 0 ]] || echo "$(t version_stats_no_data)"
 }
 
+test_b_transport() (
+  local tag="$1" label="$2"
+  local test_dir test_config test_log test_port test_pid=""
+  local result http_code elapsed error_line ready=0 i
+  test_dir=$(mktemp -d)
+  test_config="$test_dir/config.json"
+  test_log="$test_dir/sing-box.log"
+
+  cleanup_b_transport_test() {
+    if [[ -n "$test_pid" ]] && kill -0 "$test_pid" 2>/dev/null; then
+      kill "$test_pid" 2>/dev/null || true
+      wait "$test_pid" 2>/dev/null || true
+    fi
+    rm -rf "$test_dir"
+  }
+  trap cleanup_b_transport_test EXIT
+
+  test_port=$(python3 - <<'PYEOF'
+import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+PYEOF
+  )
+
+  if ! jq --arg tag "$tag" --argjson port "$test_port" '
+      .outbounds[] | select(.tag == $tag) as $out |
+      {
+        log: {level: "debug", timestamp: true},
+        inbounds: [{
+          type: "mixed", tag: "transport-test-in",
+          listen: "127.0.0.1", listen_port: $port
+        }],
+        outbounds: [$out],
+        route: {final: $tag}
+      }
+    ' "$CONFIG" > "$test_config"; then
+    printf -- "$(t transport_test_result_invalid)\n" "$label"
+    return 1
+  fi
+
+  if ! sing-box check -c "$test_config" >/dev/null 2>"$test_log"; then
+    printf -- "$(t transport_test_result_invalid)\n" "$label"
+    return 1
+  fi
+
+  sing-box run -c "$test_config" >"$test_log" 2>&1 &
+  test_pid=$!
+  for i in $(seq 1 30); do
+    if ! kill -0 "$test_pid" 2>/dev/null; then
+      break
+    fi
+    if python3 - "$test_port" <<'PYEOF' >/dev/null 2>&1
+import socket
+import sys
+s = socket.socket()
+s.settimeout(0.2)
+try:
+    s.connect(("127.0.0.1", int(sys.argv[1])))
+finally:
+    s.close()
+PYEOF
+    then
+      ready=1
+      break
+    fi
+    sleep 0.1
+  done
+  if [[ "$ready" != "1" ]]; then
+    error_line=$(grep -E 'ERROR|FATAL' "$test_log" | tail -1 || true)
+    printf -- "$(t transport_test_result_start_failed)\n" "$label" "${error_line:-$(t transport_test_no_details)}"
+    return 1
+  fi
+
+  result=$(curl -4 -sS --socks5-hostname "127.0.0.1:${test_port}" \
+    --connect-timeout 5 --max-time 20 -o /dev/null \
+    -w '%{http_code} %{time_total}' \
+    https://www.gstatic.com/generate_204 2>"$test_dir/curl.log" || true)
+  read -r http_code elapsed <<< "$result"
+  if [[ "$http_code" == "204" ]]; then
+    printf -- "$(t transport_test_result_ok)\n" "$label" "$elapsed"
+    return 0
+  fi
+
+  error_line=$(grep -E 'ERROR|FATAL' "$test_log" | tail -1 || true)
+  if [[ -z "$error_line" && -s "$test_dir/curl.log" ]]; then
+    error_line=$(tail -1 "$test_dir/curl.log")
+  fi
+  printf -- "$(t transport_test_result_failed)\n" "$label" "${error_line:-$(t transport_test_no_details)}"
+  return 1
+)
+
+test_b_transports() {
+  local resolved tcp_status="FAIL" current="direct" recommended=""
+  local hy2_ok=0 vless_ok=0 answer
+
+  echo "$(t transport_test_header)"
+  resolved=$(getent ahostsv4 "$B_DOMAIN" 2>/dev/null | awk 'NR==1 {print $1}')
+  if [[ -n "$resolved" ]]; then
+    printf -- "$(t transport_test_dns_ok)\n" "$B_DOMAIN" "$resolved"
+  else
+    printf -- "$(t transport_test_dns_failed)\n" "$B_DOMAIN"
+  fi
+
+  if python3 - "$B_DOMAIN" "$B_PORT" <<'PYEOF' >/dev/null 2>&1
+import socket
+import sys
+sock = socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=5)
+sock.close()
+PYEOF
+  then
+    tcp_status="OK"
+    printf -- "$(t transport_test_tcp_ok)\n" "$B_DOMAIN" "$B_PORT"
+  else
+    printf -- "$(t transport_test_tcp_failed)\n" "$B_DOMAIN" "$B_PORT"
+  fi
+
+  if jq -e '.outbounds[] | select(.tag == "hy2-out")' "$CONFIG" >/dev/null 2>&1; then
+    if test_b_transport "hy2-out" "$(t transport_test_label_hy2)"; then
+      hy2_ok=1
+      recommended="hy2-out"
+    fi
+  else
+    echo "$(t transport_test_hy2_missing)"
+  fi
+
+  if jq -e '.outbounds[] | select(.tag == "vless-out-b")' "$CONFIG" >/dev/null 2>&1; then
+    if test_b_transport "vless-out-b" "$(t transport_test_label_vless)"; then
+      vless_ok=1
+      [[ -z "$recommended" ]] && recommended="vless-out-b"
+    fi
+  else
+    echo "$(t transport_test_vless_missing)"
+  fi
+
+  if [[ "$tcp_status" == "FAIL" && "$hy2_ok" == "1" && "$vless_ok" == "0" ]]; then
+    echo "$(t transport_test_tcp_explanation1)"
+    echo "$(t transport_test_tcp_explanation2)"
+  fi
+
+  local transport_file=/etc/sing-box/transport.env
+  local TO_B_DEFAULT="direct"
+  [[ -f "$transport_file" ]] && source "$transport_file"
+  current="$TO_B_DEFAULT"
+
+  if [[ -z "$recommended" ]]; then
+    echo "$(t transport_test_none_working)"
+    return 1
+  fi
+
+  if [[ "$current" == "hy2-out" && "$hy2_ok" == "1" ]] || \
+     [[ "$current" == "vless-out-b" && "$vless_ok" == "1" ]]; then
+    printf -- "$(t transport_test_current_ok)\n" "$current"
+    return 0
+  fi
+
+  printf -- "$(t transport_test_recommended)\n" "$recommended"
+  if [[ -t 0 ]]; then
+    read -rp "$(printf -- "$(t transport_test_switch_prompt)" "$recommended")" answer
+    if [[ "${answer,,}" != "n" ]]; then
+      printf 'TO_B_DEFAULT="%s"\n' "$recommended" > "$transport_file"
+      printf -- "$(t transport_switched)\n" "$recommended"
+      rebuild_config
+    fi
+  fi
+  return 0
+}
+
 service_menu() {
   local LOG=/var/log/nginx/profile_access.log
   echo "$(t service_header)"
@@ -1284,10 +1453,12 @@ routing_menu() {
   echo "$(t routing_header)"
   echo "$(t routing_opt_ab)"
   echo "$(t routing_opt_direct_rules)"
-  local c; read -rp "$(t prompt_choice_12)" c
+  echo "$(t routing_opt_test_ab)"
+  local c; read -rp "$(t prompt_choice_13_short)" c
   case "$c" in
     1) transport_menu ;;
     2) direct_rules_route_menu ;;
+    3) test_b_transports || true ;;
     *) echo "$(t invalid)" ;;
   esac
 }
@@ -1501,6 +1672,10 @@ fi
 if [[ "${1:-}" == "--rebuild-profiles" ]]; then
   rebuild_all_profiles
   exit 0
+fi
+if [[ "${1:-}" == "--test-b-transports" ]]; then
+  test_b_transports
+  exit $?
 fi
 
 while true; do

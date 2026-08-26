@@ -540,7 +540,9 @@ RULESET_BASE_URL="$RULESET_BASE_URL"
 LANG_CODE="$LANG_CODE"
 EOF
   chmod 600 "$CONFIG_ENV"
+  printf 'TO_B_DEFAULT="direct"\n' > /etc/sing-box/transport.env
   printf "$(t config_written)\n" "$CONFIG_ENV"
+  echo "$(t initial_b_route_direct)"
 fi
 
 for WARP_MIGRATION in \
@@ -675,6 +677,8 @@ printf "$(t b_port_label)\n" "${B_PORT}"
 echo "=================================================="
 echo
 printf "$(t b_dns_reminder)\n" "${B_DOMAIN}" "${B_PORT}"
+echo "$(t b_verify_from_a_reminder1)"
+echo "$(t b_verify_from_a_reminder2)"
 BEOF
 
   chmod +x "$B_INSTALL_PATH"
@@ -744,6 +748,15 @@ if ! systemctl is-active --quiet sing-box; then
   echo "$(t singbox_start_failed)"
   journalctl -u sing-box -n 40 --no-pager || true
   exit 1
+fi
+
+if [[ "${B_NEEDS_INSTALL:-0}" != "1" ]]; then
+  echo
+  if ! VPN_CONFIG="$CONFIG_ENV" /root/vpn-setup.sh --test-b-transports; then
+    echo "$(t existing_b_transport_warning)"
+  fi
+else
+  echo "$(t generated_b_transport_pending)"
 fi
 
 step "$(t step9)"
@@ -872,8 +885,27 @@ SUMMARY_FILE=/root/install-summary.txt
   printf "$(t final_port_wg)\n" "${WG_PORT}"
   printf "$(t final_port_hy2)\n" "${HY2_PORT}"
   printf "$(t final_port_profile)\n" "${PROFILE_PORT}"
-  echo
-  echo "$(t final_step2_header)"
+  if [[ -n "${B_INSTALL_PATH:-}" ]]; then
+    echo
+    echo "=================================================="
+    echo "$(t final_b_step_header)"
+    echo "=================================================="
+    echo
+    echo "  curl -fsSL https://${A_DOMAIN}:${PROFILE_PORT}/$(basename "$B_INSTALL_PATH") | sudo bash"
+    echo
+    printf "$(t final_b_reminder_run1)\n" "$B_DOMAIN"
+    printf "$(t final_b_reminder_run2)\n" "$B_PORT"
+    echo
+    echo "$(t final_b_verify_header)"
+    echo "$(t final_b_verify_cmd1)"
+    echo "$(t final_b_verify_cmd2)"
+    echo
+    echo "$(t final_step4_header)"
+  else
+    echo
+    echo "$(t final_step2_header)"
+  fi
+
   printf "$(t final_step2_body1)\n" "${PROFILE_PORT}"
   echo "$(t final_step2_body2)"
   echo "$(t final_step2_cmd1)"
@@ -884,18 +916,6 @@ SUMMARY_FILE=/root/install-summary.txt
   echo
   echo "$(t final_management)"
   printf "$(t final_config_label)\n" "$CONFIG_ENV"
-
-  if [[ -n "${B_INSTALL_PATH:-}" ]]; then
-    echo
-    echo "=================================================="
-    echo "$(t final_b_reminder_header)"
-    echo "=================================================="
-    echo
-    echo "  curl -fsSL https://${A_DOMAIN}:${PROFILE_PORT}/$(basename "$B_INSTALL_PATH") | sudo bash"
-    echo
-    printf "$(t final_b_reminder_run1)\n" "$B_DOMAIN"
-    printf "$(t final_b_reminder_run2)\n" "$B_PORT"
-  fi
 
   echo
   echo "=================================================="

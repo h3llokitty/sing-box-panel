@@ -215,6 +215,9 @@ T[ruleset_file_invalid.ru]="Загруженный файл не являетс�
 T[config_written.en]="Configuration written to %s"
 T[config_written.ru]="Конфигурация записана в %s"
 
+T[initial_b_route_direct.en]="The initial A -> B route is set to direct until the transports to server B are verified."
+T[initial_b_route_direct.ru]="Начальный маршрут A -> B установлен в direct до проверки транспортов к серверу B."
+
 T[generating_install_b.en]="Generating install-b.sh for server B..."
 T[generating_install_b.ru]="Генерация install-b.sh для сервера B..."
 
@@ -262,6 +265,12 @@ T[b_port_label.ru]="  Порт:   %s (Hysteria2 + VLESS+Reality на одном 
 T[b_dns_reminder.en]="Please ensure DNS for %s points to this server, and that port %s (TCP+UDP) and port 80/TCP (for ACME) are open in the firewall."
 T[b_dns_reminder.ru]="Убедитесь, что DNS для %s указывает на этот сервер, и что порт %s (TCP+UDP) и порт 80/TCP (для ACME) открыты в фаерволе."
 
+T[b_verify_from_a_reminder1.en]="Return to server A and test both A -> B transports before creating clients:"
+T[b_verify_from_a_reminder1.ru]="Вернитесь на сервер A и проверьте оба транспорта A -> B до создания клиентов:"
+
+T[b_verify_from_a_reminder2.en]="  /root/sb-panel -> 5 -> 6 -> 3"
+T[b_verify_from_a_reminder2.ru]="  /root/sb-panel -> 5 -> 6 -> 3"
+
 
 # ── final instructions ──────────────────────────────────────
 
@@ -285,6 +294,9 @@ T[final_port_profile.ru]="   - TCP %s  (раздача профилей)"
 
 T[final_step2_header.en]="2) Create the first client to start using the VPN:"
 T[final_step2_header.ru]="2) Создайте первого клиента, чтобы начать пользоваться VPN:"
+
+T[final_step4_header.en]="4) Create the first client after a working A -> B transport has been selected:"
+T[final_step4_header.ru]="4) Создайте первого клиента после выбора рабочего транспорта A -> B:"
 
 T[final_step2_body1.en]="   Profile delivery is already available on port %s."
 T[final_step2_body1.ru]="   Раздача профилей уже доступна на порту %s."
@@ -313,6 +325,18 @@ T[final_config_label.ru]="Конфигурация сервера: %s"
 T[final_b_reminder_header.en]="Don't forget to deploy server B after configuring its DNS and opening its ports:"
 T[final_b_reminder_header.ru]="Не забудьте развернуть сервер B после настройки его DNS и открытия его портов:"
 
+T[final_b_step_header.en]="2) Deploy server B after configuring its DNS and opening its ports:"
+T[final_b_step_header.ru]="2) Разверните сервер B после настройки его DNS и открытия его портов:"
+
+T[final_b_verify_header.en]="3) Return to server A, test both transports and select a working route:"
+T[final_b_verify_header.ru]="3) Вернитесь на сервер A, проверьте оба транспорта и выберите рабочий маршрут:"
+
+T[final_b_verify_cmd1.en]="   /root/sb-panel"
+T[final_b_verify_cmd1.ru]="   /root/sb-panel"
+
+T[final_b_verify_cmd2.en]="   -> 5 -> 6 -> 3"
+T[final_b_verify_cmd2.ru]="   -> 5 -> 6 -> 3"
+
 T[final_b_reminder_run1.en]="Run this on server B itself (after configuring DNS for %s"
 T[final_b_reminder_run1.ru]="Выполните это на самом сервере B (после настройки DNS для %s"
 
@@ -324,6 +348,12 @@ T[final_warp_header.ru]="Опционально: установите Cloudflare
 
 T[final_warp_note.en]="The script adds a verified WARP IPv4 outbound. Select its route later in menu 5 -> 6."
 T[final_warp_note.ru]="Скрипт добавит проверенный WARP IPv4 outbound. Маршрут выберите позже в меню 5 -> 6."
+
+T[existing_b_transport_warning.en]="No working transport to the existing server B was found. A -> B remains direct; fix connectivity and repeat the test in menu 5 -> 6 -> 3."
+T[existing_b_transport_warning.ru]="Рабочий транспорт к существующему серверу B не найден. A -> B остаётся direct; исправьте связность и повторите проверку в меню 5 -> 6 -> 3."
+
+T[generated_b_transport_pending.en]="Server B has not been deployed yet. A -> B remains direct; after deploying B, run the transport test in menu 5 -> 6 -> 3."
+T[generated_b_transport_pending.ru]="Сервер B ещё не развёрнут. A -> B остаётся direct; после установки B запустите проверку транспортов в меню 5 -> 6 -> 3."
 
 # ── install-warp.sh ─────────────────────────────────────────
 
@@ -692,6 +722,8 @@ T[routing_opt_ab.en]="  1) A -> B route"
 T[routing_opt_ab.ru]="  1) маршрут A -> B"
 T[routing_opt_direct_rules.en]="  2) route for direct rules (.ru/.su/.рф and geoip-ru)"
 T[routing_opt_direct_rules.ru]="  2) маршрут direct-правил (.ru/.su/.рф и geoip-ru)"
+T[routing_opt_test_ab.en]="  3) test A -> B transports"
+T[routing_opt_test_ab.ru]="  3) проверить транспорты A -> B"
 T[direct_rules_header.en]="Route for direct rules (current: %s):"
 T[direct_rules_header.ru]="Маршрут direct-правил (сейчас: %s):"
 T[direct_rules_label_direct.en]="direct (server A)"
@@ -720,6 +752,49 @@ T[prompt_choice_1n.ru]="Выбор [1-%s]: "
 
 T[transport_switched.en]="A -> B transport switched to: %s"
 T[transport_switched.ru]="Транспорт A -> B переключён на: %s"
+
+# ── A -> B transport diagnostics ────────────────────────────
+
+T[transport_test_header.en]="A -> B transport test (the active sing-box service will not be restarted):"
+T[transport_test_header.ru]="Проверка транспортов A -> B (активный sing-box не будет перезапущен):"
+T[transport_test_dns_ok.en]="  DNS: OK — %s -> %s"
+T[transport_test_dns_ok.ru]="  DNS: OK — %s -> %s"
+T[transport_test_dns_failed.en]="  DNS: FAIL — %s was not resolved"
+T[transport_test_dns_failed.ru]="  DNS: ОШИБКА — %s не разрешается"
+T[transport_test_tcp_ok.en]="  TCP %s:%s: OK"
+T[transport_test_tcp_ok.ru]="  TCP %s:%s: OK"
+T[transport_test_tcp_failed.en]="  TCP %s:%s: FAIL — connection timeout or rejection"
+T[transport_test_tcp_failed.ru]="  TCP %s:%s: ОШИБКА — таймаут или отказ соединения"
+T[transport_test_label_hy2.en]="Hysteria2"
+T[transport_test_label_hy2.ru]="Hysteria2"
+T[transport_test_label_vless.en]="VLESS/Reality"
+T[transport_test_label_vless.ru]="VLESS/Reality"
+T[transport_test_result_ok.en]="  %s: OK — HTTP 204 in %s s"
+T[transport_test_result_ok.ru]="  %s: OK — HTTP 204 за %s с"
+T[transport_test_result_failed.en]="  %s: FAIL — %s"
+T[transport_test_result_failed.ru]="  %s: ОШИБКА — %s"
+T[transport_test_result_invalid.en]="  %s: FAIL — the isolated test configuration is invalid"
+T[transport_test_result_invalid.ru]="  %s: ОШИБКА — изолированный тестовый конфиг невалиден"
+T[transport_test_result_start_failed.en]="  %s: FAIL — the isolated test process did not start: %s"
+T[transport_test_result_start_failed.ru]="  %s: ОШИБКА — изолированный тестовый процесс не запустился: %s"
+T[transport_test_no_details.en]="no diagnostic details"
+T[transport_test_no_details.ru]="нет диагностических подробностей"
+T[transport_test_hy2_missing.en]="  Hysteria2: SKIP — hy2-out is not configured"
+T[transport_test_hy2_missing.ru]="  Hysteria2: ПРОПУСК — hy2-out не настроен"
+T[transport_test_vless_missing.en]="  VLESS/Reality: SKIP — vless-out-b is not configured"
+T[transport_test_vless_missing.ru]="  VLESS/Reality: ПРОПУСК — vless-out-b не настроен"
+T[transport_test_tcp_explanation1.en]="  VLESS/Reality was not reached: TCP traffic is blocked before server B."
+T[transport_test_tcp_explanation1.ru]="  До VLESS/Reality соединение не дошло: TCP блокируется до сервера B."
+T[transport_test_tcp_explanation2.en]="  Changing Reality keys will not fix this network-path failure."
+T[transport_test_tcp_explanation2.ru]="  Смена Reality-ключей не исправит эту сетевую проблему."
+T[transport_test_none_working.en]="No working A -> B transport was found. The route was not changed."
+T[transport_test_none_working.ru]="Рабочих транспортов A -> B не найдено. Маршрут не изменён."
+T[transport_test_current_ok.en]="Current A -> B transport is working: %s"
+T[transport_test_current_ok.ru]="Текущий транспорт A -> B работает: %s"
+T[transport_test_recommended.en]="Recommended A -> B transport: %s"
+T[transport_test_recommended.ru]="Рекомендуемый транспорт A -> B: %s"
+T[transport_test_switch_prompt.en]="Switch A -> B to %s? [Y/n] "
+T[transport_test_switch_prompt.ru]="Переключить A -> B на %s? [Y/n] "
 
 # ── edit_client ──────────────────────────────────────────────
 
