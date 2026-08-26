@@ -244,6 +244,12 @@ T[b_must_run_as_root.ru]="Запустите от имени root: sudo bash ins
 T[b_installing.en]="Installing sing-box (egress node B)..."
 T[b_installing.ru]="Установка sing-box (выходной узел B)..."
 
+T[b_dns_mismatch.en]="DNS check failed for server B. Domain: %s; resolved IP: %s; this server's IPv4: %s. Fix the A record and run this installer again."
+T[b_dns_mismatch.ru]="Проверка DNS сервера B не пройдена. Домен: %s; IP в DNS: %s; IPv4 этого сервера: %s. Исправьте A-запись и снова запустите установщик."
+
+T[b_service_failed.en]="sing-box failed to start on server B. Recent service logs follow."
+T[b_service_failed.ru]="sing-box не запустился на сервере B. Ниже последние записи журнала службы."
+
 T[b_configured.en]="Server B has been configured."
 T[b_configured.ru]="Сервер B настроен."
 
@@ -259,8 +265,8 @@ T[b_dns_reminder.ru]="Убедитесь, что DNS для %s указывае�
 
 # ── final instructions ──────────────────────────────────────
 
-T[final_notice.en]="Installation complete. IMPORTANT — the server will not work without step 2:"
-T[final_notice.ru]="Установка завершена. ВАЖНО — без шага 2 сервер не будет работать:"
+T[final_notice.en]="Installation complete. The services and installer links have been verified."
+T[final_notice.ru]="Установка завершена. Службы и ссылки установщиков проверены."
 
 T[final_firewall_header.en]="1) Open the following in your provider's firewall:"
 T[final_firewall_header.ru]="1) Откройте в фаерволе провайдера:"
@@ -277,14 +283,14 @@ T[final_port_hy2.ru]="   - UDP/TCP %s  (Hysteria2 + VLESS)"
 T[final_port_profile.en]="   - TCP %s  (profile delivery)"
 T[final_port_profile.ru]="   - TCP %s  (раздача профилей)"
 
-T[final_step2_header.en]="2) *** REQUIRED RIGHT NOW *** create the first client — without this step"
-T[final_step2_header.ru]="2) *** ОБЯЗАТЕЛЬНО ПРЯМО СЕЙЧАС *** создайте первого клиента — без этого шага"
+T[final_step2_header.en]="2) Create the first client to start using the VPN:"
+T[final_step2_header.ru]="2) Создайте первого клиента, чтобы начать пользоваться VPN:"
 
-T[final_step2_body1.en]="   there will be no certificate, nginx will not start on port %s, and profile"
-T[final_step2_body1.ru]="   не будет сертификата, nginx не запустится на порту %s, а раздача"
+T[final_step2_body1.en]="   Profile delivery is already available on port %s."
+T[final_step2_body1.ru]="   Раздача профилей уже доступна на порту %s."
 
-T[final_step2_body2.en]="   delivery (as well as the install-b.sh link below, if present) will not work:"
-T[final_step2_body2.ru]="   профилей (а также ссылка на install-b.sh ниже, если она есть) не заработает:"
+T[final_step2_body2.en]="   Open the manager and choose client creation:"
+T[final_step2_body2.ru]="   Откройте менеджер и выберите создание клиента:"
 
 T[final_step2_cmd1.en]="   /root/sb-panel"
 T[final_step2_cmd1.ru]="   /root/sb-panel"
@@ -292,11 +298,11 @@ T[final_step2_cmd1.ru]="   /root/sb-panel"
 T[final_step2_cmd2.en]="   -> 1 (create client)"
 T[final_step2_cmd2.ru]="   -> 1 (создать клиента)"
 
-T[final_step2_check1.en]="   After that, check: systemctl status sing-box ; systemctl status nginx"
-T[final_step2_check1.ru]="   После этого проверьте: systemctl status sing-box ; systemctl status nginx"
+T[final_step2_check1.en]="   Optional service check: systemctl status sing-box ; systemctl status nginx"
+T[final_step2_check1.ru]="   При необходимости проверьте службы: systemctl status sing-box ; systemctl status nginx"
 
-T[final_step2_check2.en]="   If nginx did not start, restart it manually: systemctl restart nginx"
-T[final_step2_check2.ru]="   Если nginx не запустился, перезапустите его вручную: systemctl restart nginx"
+T[final_step2_check2.en]="   The installation stops with diagnostics if either service is unavailable."
+T[final_step2_check2.ru]="   Если одна из служб недоступна, установка остановится и покажет диагностику."
 
 T[final_management.en]="Management: /root/sb-panel"
 T[final_management.ru]="Управление: /root/sb-panel"
@@ -304,8 +310,8 @@ T[final_management.ru]="Управление: /root/sb-panel"
 T[final_config_label.en]="Server configuration: %s"
 T[final_config_label.ru]="Конфигурация сервера: %s"
 
-T[final_b_reminder_header.en]="Don't forget to deploy server B (after step 2 above and opening the ports on A):"
-T[final_b_reminder_header.ru]="Не забудьте развернуть сервер B (после шага 2 выше и открытия портов на A):"
+T[final_b_reminder_header.en]="Don't forget to deploy server B after configuring its DNS and opening its ports:"
+T[final_b_reminder_header.ru]="Не забудьте развернуть сервер B после настройки его DNS и открытия его портов:"
 
 T[final_b_reminder_run1.en]="Run this on server B itself (after configuring DNS for %s"
 T[final_b_reminder_run1.ru]="Выполните это на самом сервере B (после настройки DNS для %s"
@@ -920,6 +926,9 @@ T[step2.ru]="2/9 — установка Go (требуется для сборк
 T[step3.en]="3/9 — building sing-box from source (with_v2ray_api) — this will take a few minutes"
 T[step3.ru]="3/9 — сборка sing-box из исходного кода (with_v2ray_api) — это займёт несколько минут"
 
+T[build_revision_mismatch.en]="The checked-out sing-box source revision does not match the required revision."
+T[build_revision_mismatch.ru]="Версия исходного кода sing-box не совпадает с требуемой ревизией."
+
 T[step4.en]="4/9 — installing grpcurl"
 T[step4.ru]="4/9 — установка grpcurl"
 
@@ -937,3 +946,24 @@ T[step8.ru]="8/9 — копирование шаблонов и скрипта �
 
 T[step9.en]="9/9 — nginx for profile delivery + cron"
 T[step9.ru]="9/9 — nginx для раздачи профилей и cron"
+
+T[building_initial_config.en]="Building and validating the initial sing-box configuration..."
+T[building_initial_config.ru]="Сборка и проверка начальной конфигурации sing-box..."
+
+T[singbox_start_failed.en]="sing-box failed to start. Recent service logs follow."
+T[singbox_start_failed.ru]="sing-box не запустился. Ниже последние записи журнала службы."
+
+T[waiting_for_certificate.en]="Waiting for the TLS certificate..."
+T[waiting_for_certificate.ru]="Ожидание TLS-сертификата..."
+
+T[certificate_wait_failed.en]="The TLS certificate was not issued in time. Check DNS, ports 80/443, and the logs below."
+T[certificate_wait_failed.ru]="TLS-сертификат не был выпущен вовремя. Проверьте DNS, порты 80/443 и журнал ниже."
+
+T[nginx_start_failed.en]="nginx failed to start. Recent service logs follow."
+T[nginx_start_failed.ru]="nginx не запустился. Ниже последние записи журнала службы."
+
+T[installer_publish_check_failed.en]="The generated server B installer could not be retrieved through the published HTTPS URL."
+T[installer_publish_check_failed.ru]="Сгенерированный установщик сервера B не удалось получить по опубликованной HTTPS-ссылке."
+
+T[installer_publish_ready.en]="The published server B installer link has been verified."
+T[installer_publish_ready.ru]="Опубликованная ссылка установщика сервера B проверена."

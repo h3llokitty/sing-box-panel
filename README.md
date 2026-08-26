@@ -20,8 +20,8 @@ installation without reinstalling the server.
 ## Installation on a clean server
 
 ```bash
-git clone git@github.com:h3llokitty/sing-box-panel.git
-cd sing-box-panel
+git clone --branch agent/add-su-direct-route --single-branch https://github.com/h3llokitty/sing-box-panel.git /root/vpn-repo
+cd /root/vpn-repo
 sudo bash install.sh
 ```
 

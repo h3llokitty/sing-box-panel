@@ -24,6 +24,10 @@ step() { echo; echo "=================================================="; echo "
 
 RULESET_DEFAULT_BASE="https://unicorns.kz/sources"
 GEOIP_RU_RELATIVE_PATH="geoip/geoip-ru.srs"
+SING_BOX_REV="f3b0c775addeeaff256a2019ff71d32a5dce62b3"
+B_SING_BOX_VERSION="1.13.15"
+SERVICE_WAIT_SECONDS=30
+CERT_WAIT_SECONDS=180
 
 normalize_ruleset_base() {
   local value="${1:-}"
@@ -347,10 +351,14 @@ go version
 
 step "$(t step3)"
 mkdir -p /root/build
-if [[ ! -d /root/build/sing-box ]]; then
-  git clone --depth 1 https://github.com/SagerNet/sing-box.git /root/build/sing-box
+SING_BOX_SOURCE_DIR="/root/build/sing-box-${SING_BOX_REV:0:12}"
+if [[ ! -d "$SING_BOX_SOURCE_DIR/.git" ]]; then
+  git clone --filter=blob:none --no-checkout https://github.com/SagerNet/sing-box.git "$SING_BOX_SOURCE_DIR"
 fi
-cd /root/build/sing-box
+git -C "$SING_BOX_SOURCE_DIR" fetch --depth 1 origin "$SING_BOX_REV"
+git -C "$SING_BOX_SOURCE_DIR" checkout --detach "$SING_BOX_REV"
+cd "$SING_BOX_SOURCE_DIR"
+[[ "$(git rev-parse HEAD)" == "$SING_BOX_REV" ]] || { echo "$(t build_revision_mismatch)"; exit 1; }
 go build -v -trimpath \
   -tags "with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_v2ray_api,with_grpc,with_tailscale" \
   -o /root/build/sing-box-new \
@@ -591,7 +599,14 @@ fi
 
 echo "$(t b_installing)"
 apt-get update -qq
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl gnupg
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl gnupg dnsutils
+
+B_DETECTED_IP=\$(curl -4 -fsS --max-time 10 https://ifconfig.me || hostname -I | awk '{print \$1}')
+B_RESOLVED_IP=\$(dig +short "${B_DOMAIN}" @1.1.1.1 | tail -1)
+if [[ -z "\$B_DETECTED_IP" || "\$B_RESOLVED_IP" != "\$B_DETECTED_IP" ]]; then
+  printf "$(t b_dns_mismatch)\n" "${B_DOMAIN}" "\${B_RESOLVED_IP:-not resolved}" "\${B_DETECTED_IP:-unknown}"
+  exit 1
+fi
 
 mkdir -p /etc/apt/keyrings
 curl -fsSL https://sing-box.app/gpg.key -o /etc/apt/keyrings/sagernet.asc
@@ -605,7 +620,7 @@ Enabled: yes
 Signed-By: /etc/apt/keyrings/sagernet.asc
 REPO
 apt-get update -qq
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sing-box
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "sing-box=${B_SING_BOX_VERSION}"
 
 mkdir -p /etc/sing-box
 
@@ -636,8 +651,21 @@ CFGEOF
 
 sing-box check -c /etc/sing-box/config.json
 systemctl daemon-reload
-systemctl enable --now sing-box
-systemctl restart sing-box
+systemctl enable sing-box
+if ! systemctl restart sing-box; then
+  echo "$(t b_service_failed)"
+  journalctl -u sing-box -n 40 --no-pager || true
+  exit 1
+fi
+for _ in \$(seq 1 ${SERVICE_WAIT_SECONDS}); do
+  systemctl is-active --quiet sing-box && break
+  sleep 1
+done
+if ! systemctl is-active --quiet sing-box; then
+  echo "$(t b_service_failed)"
+  journalctl -u sing-box -n 40 --no-pager || true
+  exit 1
+fi
 
 echo
 echo "=================================================="
@@ -653,7 +681,7 @@ BEOF
 
   printf "$(t install_b_ready)\n" "$B_DOMAIN"
   echo
-  echo "  curl -sL https://${A_DOMAIN}:${PROFILE_PORT:-8443}/$(basename "$B_INSTALL_PATH") | sudo bash"
+  echo "  curl -fsSL https://${A_DOMAIN}:${PROFILE_PORT:-8443}/$(basename "$B_INSTALL_PATH") | sudo bash"
   echo
   echo "$(t link_will_work_after)"
 fi
@@ -701,6 +729,22 @@ cat > /root/sb-panel <<EOF
 VPN_CONFIG=$CONFIG_ENV exec /root/vpn-setup.sh "\$@"
 EOF
 chmod +x /root/sb-panel
+
+echo "$(t building_initial_config)"
+if ! VPN_CONFIG="$CONFIG_ENV" /root/vpn-setup.sh --rebuild-config; then
+  echo "$(t singbox_start_failed)"
+  journalctl -u sing-box -n 40 --no-pager || true
+  exit 1
+fi
+for _ in $(seq 1 "$SERVICE_WAIT_SECONDS"); do
+  systemctl is-active --quiet sing-box && break
+  sleep 1
+done
+if ! systemctl is-active --quiet sing-box; then
+  echo "$(t singbox_start_failed)"
+  journalctl -u sing-box -n 40 --no-pager || true
+  exit 1
+fi
 
 step "$(t step9)"
 cat > /etc/nginx/conf.d/singbox-ua.conf <<'NGINX'
@@ -772,16 +816,43 @@ SVCUNIT
 systemctl daemon-reload
 systemctl enable --now nginx-cert-reload.path
 
-CERT_PATH="/var/lib/sing-box/.local/share/certmagic/certificates/acme-v02.api.letsencrypt.org-directory/${A_DOMAIN}/${A_DOMAIN}.crt"
-if [[ -f "$CERT_PATH" ]]; then
-  nginx -t
-  if systemctl is-active --quiet nginx; then
-    systemctl reload nginx
-  else
-    systemctl start nginx
-  fi
+echo "$(t waiting_for_certificate)"
+for _ in $(seq 1 "$CERT_WAIT_SECONDS"); do
+  [[ -s "$CRT" && -s "$KEY" ]] && break
+  sleep 1
+done
+if [[ ! -s "$CRT" || ! -s "$KEY" ]]; then
+  echo "$(t certificate_wait_failed)"
+  journalctl -u sing-box -n 40 --no-pager || true
+  exit 1
+fi
+nginx -t
+if systemctl is-active --quiet nginx; then
+  systemctl reload nginx
 else
-  echo "$(t cert_not_ready_yet_install)"
+  systemctl start nginx
+fi
+for _ in $(seq 1 "$SERVICE_WAIT_SECONDS"); do
+  systemctl is-active --quiet nginx && break
+  sleep 1
+done
+if ! systemctl is-active --quiet nginx; then
+  echo "$(t nginx_start_failed)"
+  journalctl -u nginx -n 40 --no-pager || true
+  exit 1
+fi
+
+if [[ -n "${B_INSTALL_PATH:-}" ]]; then
+  B_INSTALL_CHECK=$(mktemp)
+  if ! curl -fsS --noproxy '*' --resolve "${A_DOMAIN}:${PROFILE_PORT}:127.0.0.1" \
+      "https://${A_DOMAIN}:${PROFILE_PORT}/$(basename "$B_INSTALL_PATH")" -o "$B_INSTALL_CHECK" || \
+      ! cmp -s "$B_INSTALL_PATH" "$B_INSTALL_CHECK"; then
+    rm -f "$B_INSTALL_CHECK"
+    echo "$(t installer_publish_check_failed)"
+    exit 1
+  fi
+  rm -f "$B_INSTALL_CHECK"
+  echo "$(t installer_publish_ready)"
 fi
 
 (crontab -l 2>/dev/null | grep -v 'cron-traffic' || true; echo "*/15 * * * * /usr/bin/bash /root/vpn-setup.sh --cron-traffic >/dev/null 2>&1") | crontab -
@@ -820,7 +891,7 @@ SUMMARY_FILE=/root/install-summary.txt
     echo "$(t final_b_reminder_header)"
     echo "=================================================="
     echo
-    echo "  curl -sL https://${A_DOMAIN}:${PROFILE_PORT}/$(basename "$B_INSTALL_PATH") | sudo bash"
+    echo "  curl -fsSL https://${A_DOMAIN}:${PROFILE_PORT}/$(basename "$B_INSTALL_PATH") | sudo bash"
     echo
     printf "$(t final_b_reminder_run1)\n" "$B_DOMAIN"
     printf "$(t final_b_reminder_run2)\n" "$B_PORT"

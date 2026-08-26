@@ -1494,6 +1494,7 @@ if [[ "${1:-}" == "--cron-traffic" ]]; then
   exit 0
 fi
 if [[ "${1:-}" == "--rebuild-config" ]]; then
+  ensure_base
   rebuild_config
   exit 0
 fi
