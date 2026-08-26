@@ -14,11 +14,7 @@
       { "inbound": ["dns-in"], "action": "route-options", "override_address": "8.8.8.8", "override_port": 53 },
       { "inbound": ["tun-in","mixed-in"], "port": [53], "action": "hijack-dns" },
       { "inbound": ["dns-in"], "action": "hijack-dns" },
-      { "inbound": ["tun-in","mixed-in"], "action": "sniff", "timeout": "1s" },
-      { "protocol": "bittorrent", "outbound": "direct" },
-      { "protocol": "quic", "port": [443], "action": "reject" },
-      { "port": [25,465,587,143,993,110,995], "outbound": "direct" },
-      { "ip_cidr": ["224.0.0.0/3","ff00::/8"], "source_ip_cidr": ["224.0.0.0/3","ff00::/8"], "action": "reject" }
+      { "inbound": ["tun-in","mixed-in"], "action": "sniff", "timeout": "1s" }
     ]
   },
   "experimental": {

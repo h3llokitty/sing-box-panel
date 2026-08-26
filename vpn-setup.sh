@@ -612,10 +612,14 @@ for outbound in config["outbounds"]:
 with open(routing) as routing_file:
     policy = json.load(routing_file)
 rule_sets = policy.get("rule_set", [])
+common_rules = policy.get("common_rules", [])
+variant_rules = policy.get("modern_rules", [])
 rules = policy.get("rules", [])
-if not isinstance(rule_sets, list) or not isinstance(rules, list):
+if not all(isinstance(value, list) for value in (rule_sets, common_rules, variant_rules, rules)):
     raise ValueError(shape_error)
 config["route"]["rule_set"].extend(rule_sets)
+config["route"]["rules"].extend(common_rules)
+config["route"]["rules"].extend(variant_rules)
 config["route"]["rules"].extend(rules)
 with open(out, "w") as output_file:
     json.dump(config, output_file, indent=2)
@@ -659,10 +663,14 @@ for outbound in config["outbounds"]:
 with open(routing) as routing_file:
     policy = json.load(routing_file)
 rule_sets = policy.get("rule_set", [])
+common_rules = policy.get("common_rules", [])
+variant_rules = policy.get("legacy_rules", [])
 rules = policy.get("rules", [])
-if not isinstance(rule_sets, list) or not isinstance(rules, list):
+if not all(isinstance(value, list) for value in (rule_sets, common_rules, variant_rules, rules)):
     raise ValueError(shape_error)
 config["route"]["rule_set"].extend(rule_sets)
+config["route"]["rules"].extend(common_rules)
+config["route"]["rules"].extend(variant_rules)
 config["route"]["rules"].extend(rules)
 with open(out, "w") as output_file:
     json.dump(config, output_file, indent=2)
@@ -1098,6 +1106,59 @@ traffic_menu() {
   esac
 }
 
+version_stats() {
+  local log_glob="/var/log/nginx/profile_access.log*"
+  local result
+  result=$(python3 - "$PROFILES" $log_glob <<'PYEOF'
+import glob
+import gzip
+import os
+import re
+import sys
+
+profiles = sys.argv[1]
+logs = sys.argv[2:]
+known = set()
+for path in glob.glob(os.path.join(profiles, "*-modern.json")):
+    known.add(os.path.basename(path)[:-len("-modern.json")])
+
+requests = {"modern": 0, "legacy": 0}
+latest = {}
+pattern = re.compile(r"^(\S+).*\| key=([^ |]+) \| variant=(modern|legacy) \|")
+for path in logs:
+    try:
+        opener = gzip.open if path.endswith(".gz") else open
+        with opener(path, "rt", errors="replace") as stream:
+            for line in stream:
+                match = pattern.search(line)
+                if not match:
+                    continue
+                stamp, key, variant = match.groups()
+                if key not in known:
+                    continue
+                requests[variant] += 1
+                if key not in latest or stamp >= latest[key][0]:
+                    latest[key] = (stamp, variant)
+    except (OSError, EOFError):
+        continue
+
+profiles_by_variant = {"modern": 0, "legacy": 0}
+for _, variant in latest.values():
+    profiles_by_variant[variant] += 1
+for variant in ("modern", "legacy"):
+    print(variant, profiles_by_variant[variant], requests[variant])
+PYEOF
+  )
+
+  local variant profiles_count requests_count total=0
+  while read -r variant profiles_count requests_count; do
+    [[ -n "$variant" ]] || continue
+    printf -- "$(t version_stats_row)\n" "$variant" "$profiles_count" "$requests_count"
+    total=$((total + requests_count))
+  done <<< "$result"
+  [[ $total -gt 0 ]] || echo "$(t version_stats_no_data)"
+}
+
 service_menu() {
   local LOG=/var/log/nginx/profile_access.log
   echo "$(t service_header)"
@@ -1132,7 +1193,7 @@ service_menu() {
       ;;
     2)
       echo "$(t version_stats_header)"
-      grep -o 'variant=[a-z]*' "$LOG" | sort | uniq -c
+      version_stats
       ;;
     3)
       echo "$(t live_log_header)"

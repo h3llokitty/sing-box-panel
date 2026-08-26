@@ -131,6 +131,16 @@ Run `/root/sb-panel --rebuild-profiles` after editing routing manually, or use
 the corresponding service-menu command. Published modern/legacy profile URLs
 do not change.
 
+Client routing files separate portable policy rules by compatibility level:
+
+- `common_rules` are added to both profile variants before user rules;
+- `modern_rules` are added only to the sing-box 1.12+ profile;
+- `legacy_rules` are added only to the sing-box 1.11.x profile;
+- `rules` contains the ordinary per-client policy applied after those rules.
+
+DNS interception, resolution, and sniffing remain in the profile templates as
+mandatory transport plumbing rather than editable policy.
+
 ## Server B requirements
 
 A separate sing-box instance with a Hysteria2 inbound (and optionally

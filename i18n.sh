@@ -610,8 +610,14 @@ T[prompt_device_number.ru]="Номер устройства: "
 T[no_requests_found.en]="No requests found."
 T[no_requests_found.ru]="Обращений не найдено."
 
-T[version_stats_header.en]="Version statistics (all clients):"
-T[version_stats_header.ru]="Статистика по версиям (все клиенты):"
+T[version_stats_header.en]="Version statistics (known client profiles):"
+T[version_stats_header.ru]="Статистика по версиям (известные профили клиентов):"
+
+T[version_stats_row.en]="  %s: %d profile(s), %d request(s)"
+T[version_stats_row.ru]="  %s: профилей — %d, запросов — %d"
+
+T[version_stats_no_data.en]="  No requests from known client profiles."
+T[version_stats_no_data.ru]="  Запросов от известных профилей клиентов нет."
 
 T[live_log_header.en]="Live log monitoring (Ctrl+C to exit):"
 T[live_log_header.ru]="Живой мониторинг (Ctrl+C для выхода):"
