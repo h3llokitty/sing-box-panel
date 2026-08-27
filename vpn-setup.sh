@@ -1313,6 +1313,7 @@ PYEOF
   if [[ "$current" == "hy2-out" && "$hy2_ok" == "1" ]] || \
      [[ "$current" == "vless-out-b" && "$vless_ok" == "1" ]]; then
     printf -- "$(t transport_test_current_ok)\n" "$current"
+    [[ "$hy2_ok" == "1" && "$vless_ok" == "1" ]] && maybe_revoke_b_bootstrap
     return 0
   fi
 
@@ -1325,7 +1326,32 @@ PYEOF
       rebuild_config
     fi
   fi
+  [[ "$hy2_ok" == "1" && "$vless_ok" == "1" ]] && maybe_revoke_b_bootstrap
   return 0
+}
+
+maybe_revoke_b_bootstrap() {
+  local installer="${B_INSTALL_PATH:-}" binary="${B_BINARY_PATH:-}" answer
+  [[ -t 0 && ( -n "$installer" || -n "$binary" ) ]] || return 0
+  [[ -z "$installer" || "$installer" == /opt/vpn/profiles/install-b-*.sh ]] || return 0
+  [[ -z "$binary" || "$binary" == /opt/vpn/profiles/sing-box-b-* ]] || return 0
+  [[ ( -n "$installer" && -f "$installer" ) || ( -n "$binary" && -f "$binary" ) ]] || return 0
+  read -rp "$(t b_bootstrap_revoke_prompt)" answer
+  [[ "${answer,,}" != "n" ]] || return 0
+  [[ -n "$installer" ]] && rm -f -- "$installer"
+  [[ -n "$binary" ]] && rm -f -- "$binary"
+  sed -i \
+    -e '/^B_INSTALL_PATH=/d' \
+    -e '/^B_BINARY_PATH=/d' \
+    -e '/^B_REALITY_PRIV=/d' \
+    -e '/^B_NEEDS_INSTALL=/d' \
+    "$CONFIG_FILE"
+  printf 'B_NEEDS_INSTALL=0\n' >> "$CONFIG_FILE"
+  B_INSTALL_PATH=""
+  B_BINARY_PATH=""
+  B_REALITY_PRIV=""
+  B_NEEDS_INSTALL=0
+  echo "$(t b_bootstrap_revoked)"
 }
 
 service_menu() {

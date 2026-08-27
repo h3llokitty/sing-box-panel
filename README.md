@@ -40,6 +40,11 @@ you'll be asked to choose a language on first run. It will then ask for:
 
 The installation compiles sing-box from source with `with_v2ray_api` support
 (required for per-client traffic statistics) — this takes 5-15 minutes.
+For an interactive SSH installation it offers to run inside a persistent `tmux`
+session. If SSH disconnects, reconnect and run
+`tmux attach -t sing-box-install`. Completed installer steps are checkpointed;
+running `install.sh` again resumes from the first incomplete step and reuses a
+verified build of the pinned sing-box revision.
 
 The Russian-resource policy is disabled by default. When enabled, its suffix
 rules and `geoip-ru` are added together to both server and client routing. The
@@ -49,7 +54,13 @@ rule-set storage service on server A.
 
 If server B doesn't exist yet, `install.sh` will generate a ready-to-run
 `install-b.sh` script and print a `curl | sudo bash` command to deploy it —
-just run that command on server B once its DNS is configured.
+just run that command on server B once its DNS is configured. The installer also
+publishes a tokenized copy of A's verified sing-box binary, checks its SHA-256 on
+B, and pins both systemd services to the managed binary at
+`/usr/local/lib/sing-box-panel/sing-box` so package upgrades cannot silently
+replace it. The B package is additionally placed on hold. After both A→B
+transports pass the manager test, the manager offers to remove the temporary B
+installer and binary from profile delivery (default: yes).
 
 ## Choosing a Reality masking site
 

@@ -17,11 +17,11 @@ T[must_run_as_root.ru]="Запустите от имени root: sudo bash insta
 T[rollback_header.en]="INSTALLATION DID NOT COMPLETE (error). Rolling back changes..."
 T[rollback_header.ru]="Установка не была завершена (ошибка). Выполняется откат изменений..."
 
-T[rollback_done.en]="Rollback complete. Please run install.sh again to retry."
-T[rollback_done.ru]="Откат завершён. Запустите install.sh повторно, чтобы повторить попытку."
+T[rollback_done.en]="Cleanup complete. The installer will continue with a clean installation."
+T[rollback_done.ru]="Очистка завершена. Установщик продолжит чистую установку."
 
-T[rollback_binary_kept.en]="(The sing-box binary at /usr/bin/sing-box and the Go toolchain have been left in place — reinstallation will be faster.)"
-T[rollback_binary_kept.ru]="(Бинарный файл sing-box в /usr/bin/sing-box и Go оставлены без изменений — переустановка пройдёт быстрее.)"
+T[rollback_binary_kept.en]="(The managed sing-box binary at /usr/local/lib/sing-box-panel/sing-box and the Go toolchain have been left in place — reinstallation will be faster.)"
+T[rollback_binary_kept.ru]="(Управляемый бинарный файл sing-box в /usr/local/lib/sing-box-panel/sing-box и Go оставлены без изменений — переустановка пройдёт быстрее.)"
 
 T[done_marker_found.en]="A completed prior installation was detected (dated %s)."
 T[done_marker_found.ru]="Обнаружена ранее завершённая установка (от %s)."
@@ -77,8 +77,21 @@ T[reinstall_cancelled.ru]="Отменено. Для управления кли�
 T[reinstall_proceeding.en]="Proceeding — removing the current installation before reinstalling..."
 T[reinstall_proceeding.ru]="Продолжение — удаление текущей установки перед переустановкой..."
 
-T[resuming_incomplete_install.en]="An incomplete prior installation was detected — rolling back before retrying."
-T[resuming_incomplete_install.ru]="Обнаружена незавершённая установка — выполняется откат перед повторной попыткой."
+T[resuming_incomplete_install.en]="An incomplete prior installation was detected — completed steps will be reused."
+T[resuming_incomplete_install.ru]="Обнаружена незавершённая установка — завершённые шаги будут использованы повторно."
+
+T[tmux_offer.en]="Run the installation in a persistent tmux session? [Y/n] "
+T[tmux_offer.ru]="Запустить установку в устойчивой tmux-сессии? [Y/n] "
+T[tmux_installing.en]="Installing tmux (SSH services will not be restarted)..."
+T[tmux_installing.ru]="Установка tmux (SSH-службы не будут перезапускаться)..."
+T[tmux_attach_hint.en]="If SSH disconnects, reconnect and resume with:"
+T[tmux_attach_hint.ru]="Если SSH отключится, подключитесь снова и продолжите командой:"
+T[install_paused.en]="Installation stopped after completed step %s. Existing results were kept."
+T[install_paused.ru]="Установка остановилась после завершённого шага %s. Полученные результаты сохранены."
+T[install_resume_command.en]="Run the same install.sh again; it will resume from the next incomplete step."
+T[install_resume_command.ru]="Снова запустите тот же install.sh: работа продолжится с ближайшего незавершённого шага."
+T[step_skipped.en]="Step %s is already complete — reusing it."
+T[step_skipped.ru]="Шаг %s уже завершён — использую его результат."
 
 T[build_failed.en]="The sing-box build failed; aborting installation."
 T[build_failed.ru]="Сборка sing-box завершилась ошибкой; установка прервана."
@@ -88,6 +101,18 @@ T[v2ray_api_missing.ru]="Тег with_v2ray_api не найден в собран
 
 T[build_success.en]="sing-box was built successfully."
 T[build_success.ru]="Сборка sing-box завершена успешно."
+T[build_reused.en]="Using the existing verified sing-box build for revision %s."
+T[build_reused.ru]="Используется существующая проверенная сборка sing-box ревизии %s."
+T[build_checkpoint_invalid.en]="The saved sing-box build does not match its revision/SHA-256 checkpoint; rebuilding it."
+T[build_checkpoint_invalid.ru]="Сохранённая сборка sing-box не совпадает с контрольной точкой ревизии/SHA-256; выполняется повторная сборка."
+T[generated_b_reused.en]="Using the existing generated server B installer: %s"
+T[generated_b_reused.ru]="Используется уже созданный установщик сервера B: %s"
+T[generated_warp_reused.en]="Using the existing generated WARP installer: %s"
+T[generated_warp_reused.ru]="Используется уже созданный установщик WARP: %s"
+T[singbox_runtime_label.en]="  sing-box: %s (revision %s)"
+T[singbox_runtime_label.ru]="  sing-box: %s (ревизия %s)"
+T[singbox_b_same_binary.en]="Server B will install the exact same verified sing-box binary."
+T[singbox_b_same_binary.ru]="Сервер B установит тот же самый проверенный бинарный файл sing-box."
 
 T[existing_config_found.en]="An existing configuration was found at %s."
 T[existing_config_found.ru]="Обнаружена существующая конфигурация: %s."
@@ -795,6 +820,10 @@ T[transport_test_recommended.en]="Recommended A -> B transport: %s"
 T[transport_test_recommended.ru]="Рекомендуемый транспорт A -> B: %s"
 T[transport_test_switch_prompt.en]="Switch A -> B to %s? [Y/n] "
 T[transport_test_switch_prompt.ru]="Переключить A -> B на %s? [Y/n] "
+T[b_bootstrap_revoke_prompt.en]="Both B transports work. Remove the published B installer and binary now? [Y/n] "
+T[b_bootstrap_revoke_prompt.ru]="Оба транспорта B работают. Удалить опубликованные установщик B и бинарный файл? [Y/n] "
+T[b_bootstrap_revoked.en]="The server B bootstrap files have been removed from profile delivery."
+T[b_bootstrap_revoked.ru]="Файлы первичной установки сервера B удалены из раздачи профилей."
 
 # ── edit_client ──────────────────────────────────────────────
 
@@ -1042,3 +1071,7 @@ T[installer_publish_check_failed.ru]="Сгенерированный устан�
 
 T[installer_publish_ready.en]="The published server B installer link has been verified."
 T[installer_publish_ready.ru]="Опубликованная ссылка установщика сервера B проверена."
+T[binary_publish_check_failed.en]="The verified sing-box binary for server B could not be retrieved through the published HTTPS URL."
+T[binary_publish_check_failed.ru]="Проверенный бинарный файл sing-box для сервера B не удалось получить по опубликованной HTTPS-ссылке."
+T[binary_publish_ready.en]="The published sing-box binary for server B has been verified by SHA-256."
+T[binary_publish_ready.ru]="Опубликованный бинарный файл sing-box для сервера B проверен по SHA-256."

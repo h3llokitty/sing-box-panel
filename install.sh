@@ -4,14 +4,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/i18n.sh"
 
-echo "$(t warp_language_title)"
-echo "$(t warp_language_en)"
-echo "$(t warp_language_ru)"
-read -rp "$(t warp_language_prompt)" LANG_CHOICE
-case "$LANG_CHOICE" in
-  2) LANG_CODE="ru" ;;
-  *) LANG_CODE="en" ;;
-esac
+if [[ -n "${SBP_LANG:-}" ]]; then
+  LANG_CODE="$SBP_LANG"
+else
+  echo "$(t warp_language_title)"
+  echo "$(t warp_language_en)"
+  echo "$(t warp_language_ru)"
+  read -rp "$(t warp_language_prompt)" LANG_CHOICE
+  case "$LANG_CHOICE" in
+    2) LANG_CODE="ru" ;;
+    *) LANG_CODE="en" ;;
+  esac
+fi
 
 if [[ $EUID -ne 0 ]]; then
   echo "$(t must_run_as_root)"
@@ -19,15 +23,68 @@ if [[ $EUID -ne 0 ]]; then
 fi
 MARKER=/etc/sing-box/.install-in-progress
 DONE_MARKER=/etc/sing-box/.install-done
+INSTALL_STATE_DIR=/var/lib/sing-box-panel
+INSTALL_STATE_FILE=$INSTALL_STATE_DIR/install-step
+SING_BOX_REV_FILE=/usr/lib/sing-box-panel/sing-box-revision
+SING_BOX_SHA_FILE=/usr/lib/sing-box-panel/sing-box-sha256
+SING_BOX_BIN=/usr/local/lib/sing-box-panel/sing-box
+
+# Do not let needrestart terminate the SSH session during package installation.
+export NEEDRESTART_MODE=l
 
 step() { echo; echo "=================================================="; echo "$1"; echo "=================================================="; }
 
 RULESET_DEFAULT_BASE="https://unicorns.kz/sources"
 GEOIP_RU_RELATIVE_PATH="geoip/geoip-ru.srs"
 SING_BOX_REV="f3b0c775addeeaff256a2019ff71d32a5dce62b3"
-B_SING_BOX_VERSION="1.13.15"
 SERVICE_WAIT_SECONDS=30
 CERT_WAIT_SECONDS=180
+
+maybe_start_tmux() {
+  [[ -t 0 && -t 1 && -z "${TMUX:-}" && "${SBP_IN_TMUX:-0}" != "1" ]] || return 0
+  echo
+  read -rp "$(t tmux_offer)" answer
+  [[ "${answer,,}" != "n" ]] || return 0
+  if ! command -v tmux >/dev/null 2>&1; then
+    echo "$(t tmux_installing)"
+    apt-get update -qq
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tmux
+  fi
+  local tmux_cmd
+  printf -v tmux_cmd 'cd %q && SBP_LANG=%q SBP_IN_TMUX=1 bash %q' "$SCRIPT_DIR" "$LANG_CODE" "$SCRIPT_DIR/install.sh"
+  echo "$(t tmux_attach_hint)"
+  echo "  tmux attach -t sing-box-install"
+  exec tmux new-session -A -s sing-box-install "$tmux_cmd"
+}
+
+read_install_step() {
+  local value=0
+  [[ -f "$INSTALL_STATE_FILE" ]] && value=$(cat "$INSTALL_STATE_FILE" 2>/dev/null || printf '0')
+  [[ "$value" =~ ^[0-9]+$ ]] || value=0
+  printf '%s' "$value"
+}
+
+complete_install_step() {
+  mkdir -p "$INSTALL_STATE_DIR"
+  printf '%s\n' "$1" > "$INSTALL_STATE_FILE"
+  INSTALL_STEP="$1"
+}
+
+sing_box_build_is_verified() {
+  [[ -x "$SING_BOX_BIN" && -f "$SING_BOX_REV_FILE" && -f "$SING_BOX_SHA_FILE" ]] || return 1
+  [[ "$(cat "$SING_BOX_REV_FILE")" == "$SING_BOX_REV" ]] || return 1
+  [[ "$(sha256sum "$SING_BOX_BIN" | awk '{print $1}')" == "$(cat "$SING_BOX_SHA_FILE")" ]] || return 1
+  "$SING_BOX_BIN" version | grep -qi v2ray
+}
+
+installation_failed() {
+  local status=$?
+  trap - ERR
+  echo
+  printf "$(t install_paused)\n" "$INSTALL_STEP"
+  echo "$(t install_resume_command)"
+  exit "$status"
+}
 
 normalize_ruleset_base() {
   local value="${1:-}"
@@ -144,6 +201,7 @@ cleanup_failed_install() {
   fi
   rm -rf /etc/sing-box /opt/vpn /root/clients
   rm -rf /var/lib/cloudflare-warp
+  rm -rf "$INSTALL_STATE_DIR"
   rm -f /root/sb-panel /root/vpn-setup.sh /root/i18n.sh
   rm -f /etc/apt/sources.list.d/cloudflare-client.list
   rm -f /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
@@ -152,6 +210,8 @@ cleanup_failed_install() {
   rm -f /etc/nginx/conf.d/singbox-ua.conf
   rm -f /etc/systemd/system/sing-box.service
   rm -f /etc/systemd/system/sing-box.service.d/warp.conf
+  rm -f /etc/systemd/system/sing-box.service.d/10-panel-binary.conf
+  rmdir /etc/systemd/system/sing-box.service.d 2>/dev/null || true
   rm -f /etc/systemd/system/nginx-cert-reload.path /etc/systemd/system/nginx-cert-reload.service
   systemctl daemon-reload 2>/dev/null || true
   echo "$(t rollback_done)"
@@ -326,84 +386,123 @@ fi
 
 if [[ -f "$MARKER" ]]; then
   echo "$(t resuming_incomplete_install)"
-  cleanup_failed_install
 fi
 
+maybe_start_tmux
 mkdir -p /etc/sing-box
 touch "$MARKER"
-trap 'if [[ -f "$MARKER" ]]; then cleanup_failed_install; fi' ERR
+INSTALL_STEP=$(read_install_step)
+trap installation_failed ERR
 
-step "$(t step1)"
-apt-get update -qq
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-  curl git build-essential wireguard-tools nginx libnginx-mod-stream jq qrencode python3 openssl dnsutils
+if (( INSTALL_STEP < 1 )); then
+  step "$(t step1)"
+  apt-get update -qq
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+    curl git build-essential wireguard-tools nginx libnginx-mod-stream jq qrencode python3 openssl dnsutils tmux
+  complete_install_step 1
+else
+  printf "$(t step_skipped)\n" 1
+fi
 
-step "$(t step2)"
-if ! command -v go >/dev/null 2>&1; then
-  GOVER="go1.26.5"
-  curl -sL --max-time 120 "https://go.dev/dl/${GOVER}.linux-amd64.tar.gz" -o /tmp/go.tar.gz
-  rm -rf /usr/local/go
-  tar -C /usr/local -xzf /tmp/go.tar.gz
-  echo 'export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin' > /etc/profile.d/go.sh
+if (( INSTALL_STEP < 2 )); then
+  step "$(t step2)"
+  if ! command -v go >/dev/null 2>&1; then
+    GOVER="go1.26.5"
+    curl -sL --max-time 120 "https://go.dev/dl/${GOVER}.linux-amd64.tar.gz" -o /tmp/go.tar.gz
+    rm -rf /usr/local/go
+    tar -C /usr/local -xzf /tmp/go.tar.gz
+    echo 'export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin' > /etc/profile.d/go.sh
+  fi
+  export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin
+  go version
+  complete_install_step 2
+else
+  printf "$(t step_skipped)\n" 2
 fi
 export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin
-go version
 
-step "$(t step3)"
-mkdir -p /root/build
-SING_BOX_SOURCE_DIR="/root/build/sing-box-${SING_BOX_REV:0:12}"
-if [[ ! -d "$SING_BOX_SOURCE_DIR/.git" ]]; then
-  git clone --filter=blob:none --no-checkout https://github.com/SagerNet/sing-box.git "$SING_BOX_SOURCE_DIR"
+if (( INSTALL_STEP >= 3 )) && ! sing_box_build_is_verified; then
+  echo "$(t build_checkpoint_invalid)"
+  complete_install_step 2
 fi
-git -C "$SING_BOX_SOURCE_DIR" fetch --depth 1 origin "$SING_BOX_REV"
-git -C "$SING_BOX_SOURCE_DIR" checkout --detach "$SING_BOX_REV"
-cd "$SING_BOX_SOURCE_DIR"
-[[ "$(git rev-parse HEAD)" == "$SING_BOX_REV" ]] || { echo "$(t build_revision_mismatch)"; exit 1; }
-go build -v -trimpath \
-  -tags "with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_v2ray_api,with_grpc,with_tailscale" \
-  -o /root/build/sing-box-new \
-  ./cmd/sing-box
 
-if [[ ! -x /root/build/sing-box-new ]]; then
-  echo "$(t build_failed)"
-  exit 1
+if (( INSTALL_STEP < 3 )); then
+  step "$(t step3)"
+  if sing_box_build_is_verified; then
+    printf "$(t build_reused)\n" "$SING_BOX_REV"
+  else
+    mkdir -p /root/build
+    SING_BOX_SOURCE_DIR="/root/build/sing-box-${SING_BOX_REV:0:12}"
+    if [[ ! -d "$SING_BOX_SOURCE_DIR/.git" ]]; then
+      git clone --filter=blob:none --no-checkout https://github.com/SagerNet/sing-box.git "$SING_BOX_SOURCE_DIR"
+    fi
+    git -C "$SING_BOX_SOURCE_DIR" fetch --depth 1 origin "$SING_BOX_REV"
+    git -C "$SING_BOX_SOURCE_DIR" checkout --detach "$SING_BOX_REV"
+    [[ "$(git -C "$SING_BOX_SOURCE_DIR" rev-parse HEAD)" == "$SING_BOX_REV" ]] || { echo "$(t build_revision_mismatch)"; exit 1; }
+    (cd "$SING_BOX_SOURCE_DIR" && go build -v -trimpath \
+      -tags "with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_v2ray_api,with_grpc,with_tailscale" \
+      -o /root/build/sing-box-new ./cmd/sing-box)
+    [[ -x /root/build/sing-box-new ]] || { echo "$(t build_failed)"; exit 1; }
+    mkdir -p "$(dirname "$SING_BOX_BIN")" /usr/local/bin
+    [[ -f "$SING_BOX_BIN" ]] && cp "$SING_BOX_BIN" "${SING_BOX_BIN}.bak" 2>/dev/null || true
+    install -m 0755 /root/build/sing-box-new "$SING_BOX_BIN"
+    ln -sfn "$SING_BOX_BIN" /usr/local/bin/sing-box
+    "$SING_BOX_BIN" version | grep -qi v2ray || { echo "$(t v2ray_api_missing)"; exit 1; }
+    mkdir -p "$(dirname "$SING_BOX_REV_FILE")"
+    printf '%s\n' "$SING_BOX_REV" > "$SING_BOX_REV_FILE"
+    sha256sum "$SING_BOX_BIN" | awk '{print $1}' > "$SING_BOX_SHA_FILE"
+    echo "$(t build_success)"
+  fi
+  complete_install_step 3
+else
+  printf "$(t step_skipped)\n" 3
 fi
-[[ -f /usr/bin/sing-box ]] && cp /usr/bin/sing-box /usr/bin/sing-box.bak 2>/dev/null || true
-cp /root/build/sing-box-new /usr/bin/sing-box
-chmod +x /usr/bin/sing-box
-sing-box version | grep -i v2ray || { echo "$(t v2ray_api_missing)"; exit 1; }
-echo "$(t build_success)"
+mkdir -p /usr/local/bin
+ln -sfn "$SING_BOX_BIN" /usr/local/bin/sing-box
+SING_BOX_VERSION=$("$SING_BOX_BIN" version | sed -n '1s/^sing-box version //p')
+SING_BOX_SHA256=$(sha256sum "$SING_BOX_BIN" | awk '{print $1}')
 
-step "$(t step4)"
-if ! command -v grpcurl >/dev/null 2>&1; then
-  GRPCURL_VER="1.9.3"
-  curl -sL --max-time 60 "https://github.com/fullstorydev/grpcurl/releases/download/v${GRPCURL_VER}/grpcurl_${GRPCURL_VER}_linux_amd64.deb" -o /tmp/grpcurl.deb
-  dpkg -i /tmp/grpcurl.deb || apt-get install -f -y -qq
+if (( INSTALL_STEP < 4 )); then
+  step "$(t step4)"
+  if ! command -v grpcurl >/dev/null 2>&1; then
+    GRPCURL_VER="1.9.3"
+    curl -sL --max-time 60 "https://github.com/fullstorydev/grpcurl/releases/download/v${GRPCURL_VER}/grpcurl_${GRPCURL_VER}_linux_amd64.deb" -o /tmp/grpcurl.deb
+    dpkg -i /tmp/grpcurl.deb || DEBIAN_FRONTEND=noninteractive apt-get install -f -y -qq
+  fi
+  grpcurl --version
+  complete_install_step 4
+else
+  printf "$(t step_skipped)\n" 4
 fi
-grpcurl --version
 
-step "$(t step5)"
-cat > /etc/systemd/system/sing-box.service <<'UNIT'
+if (( INSTALL_STEP < 5 )); then
+  step "$(t step5)"
+  cat > /etc/systemd/system/sing-box.service <<'UNIT'
 [Unit]
 Description=sing-box service
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/sing-box -D /var/lib/sing-box -C /etc/sing-box run
+ExecStart=/usr/local/lib/sing-box-panel/sing-box -D /var/lib/sing-box -C /etc/sing-box run
 Restart=on-failure
 RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
 UNIT
-mkdir -p /var/lib/sing-box
-systemctl daemon-reload
+  mkdir -p /var/lib/sing-box
+  systemctl daemon-reload
+  complete_install_step 5
+else
+  printf "$(t step_skipped)\n" 5
+fi
 
-step "$(t step6)"
 CONFIG_ENV=/etc/sing-box/vpn-panel.env
 mkdir -p /etc/sing-box
 
+if (( INSTALL_STEP < 6 )); then
+step "$(t step6)"
 if [[ -f "$CONFIG_ENV" ]]; then
   printf "$(t existing_config_found)\n" "$CONFIG_ENV"
   read -rp "$(t use_existing_skip)" reuse
@@ -522,6 +621,7 @@ B_DOMAIN="$B_DOMAIN"
 B_PORT=$B_PORT
 B_PASS="$B_PASS"
 B_VLESS_UUID="$B_VLESS_UUID"
+B_REALITY_PRIV="${B_REALITY_PRIV:-}"
 B_REALITY_PUB="$B_REALITY_PUB"
 B_REALITY_SID="$B_REALITY_SID"
 B_VLESS_DEST="$B_VLESS_DEST"
@@ -537,6 +637,7 @@ WARP_PORT=40000
 WARP_TAG="WARP"
 RU_RULES_ENABLED=$RU_RULES_ENABLED
 RULESET_BASE_URL="$RULESET_BASE_URL"
+B_NEEDS_INSTALL=$B_NEEDS_INSTALL
 LANG_CODE="$LANG_CODE"
 EOF
   chmod 600 "$CONFIG_ENV"
@@ -583,12 +684,24 @@ sed -i \
   -e '/^FILES_INTERNAL_PORT=/d' \
   "$CONFIG_ENV"
 
+complete_install_step 6
+else
+  printf "$(t step_skipped)\n" 6
+fi
+
+source "$CONFIG_ENV"
+
 if [[ "${B_NEEDS_INSTALL:-0}" == "1" ]]; then
+  if [[ -n "${B_INSTALL_PATH:-}" && -n "${B_BINARY_PATH:-}" && -f "$B_INSTALL_PATH" && -f "$B_BINARY_PATH" ]]; then
+    printf "$(t generated_b_reused)\n" "$B_INSTALL_PATH"
+  else
   echo
   echo "$(t generating_install_b)"
   mkdir -p /opt/vpn/profiles
   B_TOKEN=$(openssl rand -hex 8)
   B_INSTALL_PATH="/opt/vpn/profiles/install-b-${B_TOKEN}.sh"
+  B_BINARY_PATH="/opt/vpn/profiles/sing-box-b-${B_TOKEN}"
+  install -m 0755 "$SING_BOX_BIN" "$B_BINARY_PATH"
 
   cat > "$B_INSTALL_PATH" <<BEOF
 #!/usr/bin/env bash
@@ -601,7 +714,7 @@ fi
 
 echo "$(t b_installing)"
 apt-get update -qq
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl gnupg dnsutils
+NEEDRESTART_MODE=l DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl gnupg dnsutils
 
 B_DETECTED_IP=\$(curl -4 -fsS --max-time 10 https://ifconfig.me || hostname -I | awk '{print \$1}')
 B_RESOLVED_IP=\$(dig +short "${B_DOMAIN}" @1.1.1.1 | tail -1)
@@ -622,7 +735,23 @@ Enabled: yes
 Signed-By: /etc/apt/keyrings/sagernet.asc
 REPO
 apt-get update -qq
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "sing-box=${B_SING_BOX_VERSION}"
+NEEDRESTART_MODE=l DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sing-box
+
+mkdir -p /usr/local/lib/sing-box-panel /usr/local/bin
+curl -fsSL "https://${A_DOMAIN}:${PROFILE_PORT:-8443}/$(basename "$B_BINARY_PATH")" -o /usr/local/lib/sing-box-panel/sing-box.new
+echo "${SING_BOX_SHA256}  /usr/local/lib/sing-box-panel/sing-box.new" | sha256sum -c -
+install -m 0755 /usr/local/lib/sing-box-panel/sing-box.new /usr/local/lib/sing-box-panel/sing-box
+rm -f /usr/local/lib/sing-box-panel/sing-box.new
+ln -sfn /usr/local/lib/sing-box-panel/sing-box /usr/local/bin/sing-box
+[[ "\$(sha256sum /usr/local/lib/sing-box-panel/sing-box | awk '{print \$1}')" == "${SING_BOX_SHA256}" ]]
+apt-mark hold sing-box >/dev/null
+
+mkdir -p /etc/systemd/system/sing-box.service.d
+cat > /etc/systemd/system/sing-box.service.d/10-panel-binary.conf <<'OVERRIDE'
+[Service]
+ExecStart=
+ExecStart=/usr/local/lib/sing-box-panel/sing-box -D /var/lib/sing-box -C /etc/sing-box run
+OVERRIDE
 
 mkdir -p /etc/sing-box
 
@@ -651,7 +780,7 @@ cat > /etc/sing-box/config.json <<CFGEOF
 }
 CFGEOF
 
-sing-box check -c /etc/sing-box/config.json
+/usr/local/lib/sing-box-panel/sing-box check -c /etc/sing-box/config.json
 systemctl daemon-reload
 systemctl enable sing-box
 if ! systemctl restart sing-box; then
@@ -674,6 +803,7 @@ echo "=================================================="
 echo "$(t b_configured)"
 printf "$(t b_domain_label)\n" "${B_DOMAIN}"
 printf "$(t b_port_label)\n" "${B_PORT}"
+printf "$(t singbox_runtime_label)\n" "\$(/usr/local/lib/sing-box-panel/sing-box version | sed -n '1s/^sing-box version //p')" "${SING_BOX_REV}"
 echo "=================================================="
 echo
 printf "$(t b_dns_reminder)\n" "${B_DOMAIN}" "${B_PORT}"
@@ -683,24 +813,35 @@ BEOF
 
   chmod +x "$B_INSTALL_PATH"
 
+  sed -i \
+    -e '/^B_INSTALL_PATH=/d' \
+    -e '/^B_BINARY_PATH=/d' \
+    "$CONFIG_ENV"
+  printf 'B_INSTALL_PATH="%s"\nB_BINARY_PATH="%s"\n' "$B_INSTALL_PATH" "$B_BINARY_PATH" >> "$CONFIG_ENV"
+
   printf "$(t install_b_ready)\n" "$B_DOMAIN"
   echo
   echo "  curl -fsSL https://${A_DOMAIN}:${PROFILE_PORT:-8443}/$(basename "$B_INSTALL_PATH") | sudo bash"
   echo
   echo "$(t link_will_work_after)"
+  fi
 fi
 
-source "$CONFIG_ENV"
-
-step "$(t step7)"
-RESOLVED=$(dig +short "$A_DOMAIN" @1.1.1.1 2>/dev/null | tail -1)
-if [[ "$RESOLVED" != "$A_IP" ]]; then
-  printf "$(t dns_warning)\n" "$A_DOMAIN" "$RESOLVED" "$A_IP"
-  echo "$(t dns_warning_hint)"
-  read -rp "$(t prompt_continue_anyway)" cont
-  [[ "${cont,,}" == "y" ]] || { echo "$(t aborted)"; exit 1; }
+if (( INSTALL_STEP < 7 )); then
+  step "$(t step7)"
+  RESOLVED=$(dig +short "$A_DOMAIN" @1.1.1.1 2>/dev/null | tail -1)
+  if [[ "$RESOLVED" != "$A_IP" ]]; then
+    printf "$(t dns_warning)\n" "$A_DOMAIN" "$RESOLVED" "$A_IP"
+    echo "$(t dns_warning_hint)"
+    read -rp "$(t prompt_continue_anyway)" cont
+    [[ "${cont,,}" == "y" ]] || { echo "$(t aborted)"; exit 1; }
+  fi
+  complete_install_step 7
+else
+  printf "$(t step_skipped)\n" 7
 fi
 
+if (( INSTALL_STEP < 8 )); then
 step "$(t step8)"
 mkdir -p /opt/vpn/profiles /opt/vpn/traffic/daily /etc/sing-box/clients
 
@@ -723,10 +864,16 @@ cp "$SCRIPT_DIR/i18n.sh" /opt/vpn/i18n.sh
 chmod 644 /opt/vpn/i18n.sh
 chmod +x /root/vpn-setup.sh
 
-WARP_TOKEN=$(openssl rand -hex 8)
-WARP_INSTALL_PATH="/opt/vpn/profiles/install-warp-${WARP_TOKEN}.sh"
-cp "$SCRIPT_DIR/install-warp.sh" "$WARP_INSTALL_PATH"
-chmod 755 "$WARP_INSTALL_PATH"
+if [[ -n "${WARP_INSTALL_PATH:-}" && "$WARP_INSTALL_PATH" == /opt/vpn/profiles/install-warp-*.sh && -f "$WARP_INSTALL_PATH" ]]; then
+  printf "$(t generated_warp_reused)\n" "$WARP_INSTALL_PATH"
+else
+  WARP_TOKEN=$(openssl rand -hex 8)
+  WARP_INSTALL_PATH="/opt/vpn/profiles/install-warp-${WARP_TOKEN}.sh"
+  cp "$SCRIPT_DIR/install-warp.sh" "$WARP_INSTALL_PATH"
+  chmod 755 "$WARP_INSTALL_PATH"
+  sed -i '/^WARP_INSTALL_PATH=/d' "$CONFIG_ENV"
+  printf 'WARP_INSTALL_PATH="%s"\n' "$WARP_INSTALL_PATH" >> "$CONFIG_ENV"
+fi
 
 cat > /root/sb-panel <<EOF
 #!/usr/bin/env bash
@@ -758,7 +905,12 @@ if [[ "${B_NEEDS_INSTALL:-0}" != "1" ]]; then
 else
   echo "$(t generated_b_transport_pending)"
 fi
+complete_install_step 8
+else
+  printf "$(t step_skipped)\n" 8
+fi
 
+if (( INSTALL_STEP < 9 )); then
 step "$(t step9)"
 cat > /etc/nginx/conf.d/singbox-ua.conf <<'NGINX'
 map $http_user_agent $sb_variant {
@@ -802,6 +954,11 @@ server {
     location ~ ^/install-(b|warp)-[a-f0-9]+\.sh$ {
         try_files \$uri =404;
         default_type text/x-shellscript;
+        add_header Cache-Control "no-store";
+    }
+    location ~ ^/sing-box-b-[a-f0-9]+$ {
+        try_files \$uri =404;
+        default_type application/octet-stream;
         add_header Cache-Control "no-store";
     }
     location / { return 404; }
@@ -866,11 +1023,27 @@ if [[ -n "${B_INSTALL_PATH:-}" ]]; then
   fi
   rm -f "$B_INSTALL_CHECK"
   echo "$(t installer_publish_ready)"
+  B_BINARY_CHECK=$(mktemp)
+  if ! curl -fsS --noproxy '*' --resolve "${A_DOMAIN}:${PROFILE_PORT}:127.0.0.1" \
+      "https://${A_DOMAIN}:${PROFILE_PORT}/$(basename "$B_BINARY_PATH")" -o "$B_BINARY_CHECK" || \
+      [[ "$(sha256sum "$B_BINARY_CHECK" | awk '{print $1}')" != "$SING_BOX_SHA256" ]]; then
+    rm -f "$B_BINARY_CHECK"
+    echo "$(t binary_publish_check_failed)"
+    exit 1
+  fi
+  rm -f "$B_BINARY_CHECK"
+  echo "$(t binary_publish_ready)"
 fi
 
 (crontab -l 2>/dev/null | grep -v 'cron-traffic' || true; echo "*/15 * * * * /usr/bin/bash /root/vpn-setup.sh --cron-traffic >/dev/null 2>&1") | crontab -
 
+complete_install_step 9
+else
+  printf "$(t step_skipped)\n" 9
+fi
+
 rm -f "$MARKER"
+rm -f "$INSTALL_STATE_FILE"
 date > "$DONE_MARKER"
 trap - ERR
 
@@ -879,6 +1052,8 @@ SUMMARY_FILE=/root/install-summary.txt
 {
   echo
   echo "$(t final_notice)"
+  printf "$(t singbox_runtime_label)\n" "$SING_BOX_VERSION" "$SING_BOX_REV"
+  [[ "${B_NEEDS_INSTALL:-0}" == "1" ]] && echo "$(t singbox_b_same_binary)"
   echo
   echo "$(t final_firewall_header)"
   echo "$(t final_port_80)"
