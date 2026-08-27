@@ -59,8 +59,10 @@ SERVER_ROUTING=/opt/vpn/server-routing.json
 CLIENT_ROUTING_TEMPLATE=/opt/vpn/client-routing.json
 TEMPLATE_LEGACY=/opt/vpn/template-legacy.json
 PROFILES=/opt/vpn/profiles
-CLIENT_FILES_ROOT=/opt/vpn
+LEGACY_CLIENT_FILES_ROOT=/opt/vpn
+CLIENT_FILES_ROOT=/opt/vpn/clients
 mkdir -p "$CLI" "$PROFILES"
+install -d -m 0700 "$CLIENT_FILES_ROOT"
 TRAFFIC_DIR=/opt/vpn/traffic
 TRAFFIC_DAILY="$TRAFFIC_DIR/daily"
 TRAFFIC_STATE="$TRAFFIC_DIR/state.env"
@@ -166,6 +168,64 @@ client_routing_path() {
   printf '%s/%s_routing.json' "$(client_owner_dir "$1")" "$2"
 }
 
+migrate_client_files_layout() {
+  local env_file owner old_dir new_dir entry target migrated=0
+  local -A owners=()
+
+  install -d -m 0700 "$CLIENT_FILES_ROOT"
+  for env_file in "$CLI"/*.env; do
+    [[ -e "$env_file" ]] || continue
+    owner=$(sed -n 's/^NAME="\([A-Za-z0-9_]*\)"$/\1/p' "$env_file" | head -1)
+    if [[ -z "$owner" ]]; then
+      printf -- "$(t client_layout_invalid_owner)\n" "$env_file" >&2
+      return 1
+    fi
+    owners["$owner"]=1
+  done
+
+  # Preflight every collision before moving the first file.
+  for owner in "${!owners[@]}"; do
+    old_dir="$LEGACY_CLIENT_FILES_ROOT/$owner"
+    new_dir="$CLIENT_FILES_ROOT/$owner"
+    [[ -d "$old_dir" && -d "$new_dir" ]] || continue
+    while IFS= read -r -d '' entry; do
+      target="$new_dir/$(basename "$entry")"
+      [[ ! -e "$target" && ! -L "$target" ]] && continue
+      if [[ -f "$entry" && -f "$target" ]] && cmp -s "$entry" "$target"; then
+        continue
+      fi
+      printf -- "$(t client_layout_conflict)\n" "$entry" "$target" >&2
+      return 1
+    done < <(find "$old_dir" -mindepth 1 -maxdepth 1 -print0)
+  done
+
+  for owner in "${!owners[@]}"; do
+    old_dir="$LEGACY_CLIENT_FILES_ROOT/$owner"
+    new_dir="$CLIENT_FILES_ROOT/$owner"
+    [[ -d "$old_dir" ]] || continue
+    if [[ ! -e "$new_dir" ]]; then
+      mv "$old_dir" "$new_dir"
+    else
+      install -d -m 0700 "$new_dir"
+      while IFS= read -r -d '' entry; do
+        target="$new_dir/$(basename "$entry")"
+        if [[ -f "$entry" && -f "$target" ]] && cmp -s "$entry" "$target"; then
+          rm -f "$entry"
+        else
+          mv "$entry" "$target"
+        fi
+      done < <(find "$old_dir" -mindepth 1 -maxdepth 1 -print0)
+      rmdir "$old_dir"
+    fi
+    chmod 0700 "$new_dir"
+    migrated=$((migrated + 1))
+  done
+
+  if (( migrated > 0 )); then
+    printf -- "$(t client_layout_migrated)\n" "$migrated" "$CLIENT_FILES_ROOT"
+  fi
+}
+
 ensure_client_routing() {
   local owner="$1" key="$2" owner_dir routing_file legacy_routing
   owner_dir=$(client_owner_dir "$owner")
@@ -205,6 +265,8 @@ move_client_artifacts() {
   [[ -f "$old_file" ]] && mv -f "$old_file" "$new_file"
   rmdir "$old_dir" 2>/dev/null || true
 }
+
+migrate_client_files_layout
 
 rebuild_config() {
   source "$BASE"
@@ -445,6 +507,41 @@ client_proxy_types() {
   echo "$types"
 }
 
+wg_profile_mode() {
+  case "${WG_PROFILE_MODE:-urltest}" in
+    disabled|selector|urltest) printf '%s' "${WG_PROFILE_MODE:-urltest}" ;;
+    *) printf 'urltest' ;;
+  esac
+}
+
+wg_profile_enabled() {
+  [[ -n "${WG_PUB:-}" && "$(wg_profile_mode)" != "disabled" ]]
+}
+
+wg_urltest_enabled() {
+  [[ -n "${WG_PUB:-}" && "$(wg_profile_mode)" == "urltest" ]]
+}
+
+prompt_wg_profile_mode() {
+  local current="${1:-urltest}" default_choice choice
+  case "$current" in
+    disabled) default_choice=1 ;;
+    selector) default_choice=2 ;;
+    *) current=urltest; default_choice=3 ;;
+  esac
+  echo "$(t wg_profile_mode_header)"
+  echo "$(t wg_profile_mode_disabled)"
+  echo "$(t wg_profile_mode_selector)"
+  echo "$(t wg_profile_mode_urltest)"
+  read -rp "$(printf -- "$(t prompt_choice_13_default)" "$default_choice")" choice
+  case "${choice:-$default_choice}" in
+    1) WG_PROFILE_MODE_CHOICE=disabled ;;
+    2) WG_PROFILE_MODE_CHOICE=selector ;;
+    3) WG_PROFILE_MODE_CHOICE=urltest ;;
+    *) echo "$(t invalid)"; return 1 ;;
+  esac
+}
+
 
 # по типу прокси-протокола строит полный тег с доменом (WG/Hy2 -> A_DOMAIN, VLESS -> VLESS_DEST)
 proxy_tag_for() {  # $1 = wg | hy2 | vless
@@ -457,8 +554,8 @@ proxy_tag_for() {  # $1 = wg | hy2 | vless
 }
 
 urltest_json() {
-  local opts="" first=1 tag count=0
-  if [[ -n "${WG_PUB:-}" ]]; then
+  local opts="" first=1 tag count=0 proxy_count=0
+  if wg_urltest_enabled; then
     tag=$(proxy_tag_for wg)
     opts+="\"${tag}\""
     first=0
@@ -470,8 +567,9 @@ urltest_json() {
     opts+="\"${tag}\""
     first=0
     count=$((count+1))
+    proxy_count=$((proxy_count+1))
   done < <(all_proxy_tags)
-  [[ $count -lt 2 ]] && return 1
+  [[ $count -lt 1 || $proxy_count -lt 1 ]] && return 1
   cat <<UT
 { "type": "urltest", "tag": "auto",
   "outbounds": [ ${opts} ],
@@ -494,8 +592,8 @@ all_proxy_tags() {
 }
 
 selector_json() {
-  local opts="" first=1 def_tag="" tag has_proxy=0
-  if [[ -n "${WG_PUB:-}" ]]; then
+  local opts="" first=1 def_tag="" tag proxy_count=0
+  if wg_profile_enabled; then
     tag=$(proxy_tag_for wg)
     opts+="\"${tag}\""
     first=0
@@ -503,16 +601,15 @@ selector_json() {
   fi
   while IFS= read -r tag; do
     [[ -z "$tag" ]] && continue
-    has_proxy=1
     [[ $first -eq 0 ]] && opts+=","
     opts+="\"${tag}\""
     first=0
     def_tag="${tag}"
+    proxy_count=$((proxy_count+1))
   done < <(all_proxy_tags)
-  if [[ $has_proxy -eq 1 ]]; then
+  if (( proxy_count >= 1 )); then
     [[ $first -eq 0 ]] && opts+=","
     opts+="\"auto\""
-    first=0
     def_tag="auto"
   fi
   cat <<SEL
@@ -557,8 +654,10 @@ CONF
 gen_profile() {
   local wg="" sel base tail proxies="" pt block first=1 routing_file
   routing_file=$(ensure_client_routing "$NAME" "$KEY")
-  if [[ -n "${WG_PUB:-}" ]]; then
+  if wg_profile_enabled; then
     wg=$(wg_endpoint_json)
+  fi
+  if [[ -n "${WG_PUB:-}" ]]; then
     gen_wg_conf >/dev/null
   else
     rm -f "$(client_wg_path "$NAME" "$KEY")"
@@ -708,7 +807,7 @@ PYEOF
 
 gen_profile_quiet() {  # $1 = ключ клиента, только пересобрать файлы, без вывода блоков
   source "$BASE"
-  NAME=""; PROFILE=""; WG_PRIV=""; WG_PUB=""; IP=""; PASS=""; VLESS_UUID=""; AIPS=""; TOKEN=""
+  NAME=""; PROFILE=""; WG_PRIV=""; WG_PUB=""; IP=""; PASS=""; VLESS_UUID=""; AIPS=""; TOKEN=""; WG_PROFILE_MODE=""
   source "$CLI/$1.env"
   local KEY="$1"
   gen_profile
@@ -738,7 +837,7 @@ rebuild_all_profiles() {
 
 emit_client() {
   source "$BASE"
-  NAME=""; PROFILE=""; WG_PRIV=""; WG_PUB=""; IP=""; PASS=""; VLESS_UUID=""; AIPS=""; TOKEN=""
+  NAME=""; PROFILE=""; WG_PRIV=""; WG_PUB=""; IP=""; PASS=""; VLESS_UUID=""; AIPS=""; TOKEN=""; WG_PROFILE_MODE=""
   source "$CLI/$1.env"
   local KEY="$1"
   printf -- "$(t client_header)\n" "${NAME}" "${PROFILE}"
@@ -746,10 +845,13 @@ emit_client() {
     echo "IP: ${WG_NET}.${IP}"
     local cf; cf=$(gen_wg_conf)
     printf -- "$(t wg_conf_label)\n" "$cf"
+    printf -- "$(t wg_profile_mode_label)\n" "$(t "wg_profile_mode_$(wg_profile_mode)_short")"
     echo
-    echo "$(t block_wg_endpoint)"
-    wg_endpoint_json | (jq . 2>/dev/null || cat)
-    echo
+    if wg_profile_enabled; then
+      echo "$(t block_wg_endpoint)"
+      wg_endpoint_json | (jq . 2>/dev/null || cat)
+      echo
+    fi
   fi
   local routing_file
   routing_file=$(ensure_client_routing "$NAME" "$KEY")
@@ -829,6 +931,12 @@ create_client() {
         2) want_proxy=0 ;;
         3) want_wg=0 ;;
       esac
+      local wg_profile_mode_choice=urltest
+      if [[ $want_wg -eq 1 && $want_proxy -eq 1 ]]; then
+        WG_PROFILE_MODE_CHOICE=""
+        prompt_wg_profile_mode urltest || return
+        wg_profile_mode_choice="$WG_PROFILE_MODE_CHOICE"
+      fi
 
       local aips="" ip="" priv="" pub="" pass="" token m
       token=$(openssl rand -hex 8)
@@ -852,6 +960,7 @@ create_client() {
         if [[ $want_wg -eq 1 ]]; then
           printf 'WG_PRIV="%s"\nWG_PUB="%s"\nIP=%s\n' "$priv" "$pub" "$ip"
           printf "AIPS=%s\n" "'$aips'"
+          printf 'WG_PROFILE_MODE="%s"\n' "$wg_profile_mode_choice"
         fi
         if [[ $want_proxy -eq 1 ]]; then
           printf 'PASS="%s"\nVLESS_UUID="%s"\n' "$pass" "$vless_uuid"
@@ -1602,11 +1711,12 @@ edit_client() {
   local oldfile="${DEVS[$((d-1))]}"
   local oldkey; oldkey=$(basename "$oldfile" .env)
 
-  local ONAME="" OPROFILE="" OWG_PRIV="" OWG_PUB="" OIP="" OPASS="" OVLESS_UUID="" OAIPS="" OTOKEN=""
-  NAME=""; PROFILE=""; WG_PRIV=""; WG_PUB=""; IP=""; PASS=""; VLESS_UUID=""; AIPS=""; TOKEN=""
+  local ONAME="" OPROFILE="" OWG_PRIV="" OWG_PUB="" OIP="" OPASS="" OVLESS_UUID="" OAIPS="" OTOKEN="" OWG_PROFILE_MODE="urltest"
+  NAME=""; PROFILE=""; WG_PRIV=""; WG_PUB=""; IP=""; PASS=""; VLESS_UUID=""; AIPS=""; TOKEN=""; WG_PROFILE_MODE=""
   source "$oldfile"
   ONAME="$NAME"; OPROFILE="$PROFILE"; OWG_PRIV="$WG_PRIV"; OWG_PUB="$WG_PUB"; OIP="$IP"
   OPASS="$PASS"; OVLESS_UUID="$VLESS_UUID"; OAIPS="$AIPS"; OTOKEN="$TOKEN"
+  OWG_PROFILE_MODE=$(wg_profile_mode)
 
   local new_name="$ONAME" new_dev="$OPROFILE"
 
@@ -1633,6 +1743,16 @@ edit_client() {
       2) want_proxy=0 ;;
       3) want_wg=0 ;;
     esac
+
+    if [[ $want_wg -eq 1 && $want_proxy -eq 1 ]]; then
+      WG_PROFILE_MODE_CHOICE=""
+      prompt_wg_profile_mode "$OWG_PROFILE_MODE" || return
+      OWG_PROFILE_MODE="$WG_PROFILE_MODE_CHOICE"
+    elif [[ $want_wg -eq 1 ]]; then
+      OWG_PROFILE_MODE=urltest
+    else
+      OWG_PROFILE_MODE=""
+    fi
 
     if [[ $want_wg -eq 1 && -z "$OWG_PUB" ]]; then
       echo "$(t wg_routing_header)"; echo "$(t wg_routing_full)"; echo "$(t wg_routing_split)"
@@ -1664,6 +1784,7 @@ edit_client() {
     if [[ -n "$OWG_PUB" ]]; then
       printf 'WG_PRIV="%s"\nWG_PUB="%s"\nIP=%s\n' "$OWG_PRIV" "$OWG_PUB" "$OIP"
       printf "AIPS=%s\n" "'$OAIPS'"
+      printf 'WG_PROFILE_MODE="%s"\n' "$OWG_PROFILE_MODE"
     fi
     if [[ -n "$OPASS" ]]; then
       printf 'PASS="%s"\n' "$OPASS"

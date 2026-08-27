@@ -517,6 +517,31 @@ T[transport_opt_proxy_only.ru]="  3) только Proxy (%s)"
 T[prompt_choice_13.en]="Choice [1-3, Enter=1]: "
 T[prompt_choice_13.ru]="Выбор [1-3, Enter=1]: "
 
+T[wg_profile_mode_header.en]="WireGuard in sing-box JSON profiles:"
+T[wg_profile_mode_header.ru]="WireGuard в JSON-профилях sing-box:"
+
+T[wg_profile_mode_disabled.en]="  1) do not include (the standalone WireGuard .conf remains available)"
+T[wg_profile_mode_disabled.ru]="  1) не включать (отдельный WireGuard .conf останется доступен)"
+
+T[wg_profile_mode_selector.en]="  2) include in Select, but exclude from Auto (urltest)"
+T[wg_profile_mode_selector.ru]="  2) включить в Select, но исключить из Auto (urltest)"
+
+T[wg_profile_mode_urltest.en]="  3) include in Select and Auto (urltest)"
+T[wg_profile_mode_urltest.ru]="  3) включить в Select и Auto (urltest)"
+
+T[prompt_choice_13_default.en]="Choice [1-3, Enter=%s]: "
+T[prompt_choice_13_default.ru]="Выбор [1-3, Enter=%s]: "
+
+T[wg_profile_mode_label.en]="WireGuard in sing-box JSON: %s"
+T[wg_profile_mode_label.ru]="WireGuard в JSON sing-box: %s"
+
+T[wg_profile_mode_disabled_short.en]="not included"
+T[wg_profile_mode_disabled_short.ru]="не включён"
+T[wg_profile_mode_selector_short.en]="Select only (excluded from Auto)"
+T[wg_profile_mode_selector_short.ru]="только Select (исключён из Auto)"
+T[wg_profile_mode_urltest_short.en]="Select and Auto"
+T[wg_profile_mode_urltest_short.ru]="Select и Auto"
+
 T[wg_routing_header.en]="WireGuard routing:"
 T[wg_routing_header.ru]="Маршрутизация WG:"
 
@@ -978,6 +1003,12 @@ T[singbox_restarted.ru]="sing-box перезапущен."
 
 T[client_profiles_rebuilt.en]="Client profiles rebuilt (%s total)."
 T[client_profiles_rebuilt.ru]="Клиентские профили пересобраны (%s шт.)."
+T[client_layout_migrated.en]="Client directories migrated (%s): %s"
+T[client_layout_migrated.ru]="Каталоги клиентов перенесены (%s): %s"
+T[client_layout_conflict.en]="Client directory migration stopped: '%s' conflicts with '%s'."
+T[client_layout_conflict.ru]="Перенос каталогов клиентов остановлен: '%s' конфликтует с '%s'."
+T[client_layout_invalid_owner.en]="Client directory migration stopped: invalid or missing NAME in %s."
+T[client_layout_invalid_owner.ru]="Перенос каталогов клиентов остановлен: некорректный или отсутствующий NAME в %s."
 
 T[profiles_rebuild_header.en]="Rebuilding remote client profiles:"
 T[profiles_rebuild_header.ru]="Пересборка remote-профилей клиентов:"

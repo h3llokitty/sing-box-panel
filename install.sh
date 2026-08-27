@@ -310,6 +310,14 @@ update_existing_install() {
     [[ -f "/opt/vpn/$file" ]] && cp -a "/opt/vpn/$file" "$backup/opt-vpn/"
   done
   [[ -f /etc/sing-box/config.json ]] && cp -a /etc/sing-box/config.json "$backup/config.json"
+  install -d -m 0700 "$backup/client-layout"
+  local env_file owner
+  for env_file in /etc/sing-box/clients/*.env; do
+    [[ -e "$env_file" ]] || continue
+    owner=$(sed -n 's/^NAME="\([A-Za-z0-9_]*\)"$/\1/p' "$env_file" | head -1)
+    [[ -n "$owner" && -d "/opt/vpn/$owner" && ! -e "$backup/client-layout/$owner" ]] || continue
+    cp -a "/opt/vpn/$owner" "$backup/client-layout/$owner"
+  done
 
   install -m 0755 "$SCRIPT_DIR/vpn-setup.sh" /root/vpn-setup.sh
   install -m 0644 "$SCRIPT_DIR/i18n.sh" /root/i18n.sh
@@ -342,6 +350,14 @@ update_existing_install() {
       [[ -f "$backup/opt-vpn/$file" ]] && cp -a "$backup/opt-vpn/$file" "/opt/vpn/$file"
     done
     [[ -f "$backup/config.json" ]] && cp -a "$backup/config.json" /etc/sing-box/config.json
+    local saved_owner saved_name
+    for saved_owner in "$backup/client-layout"/*; do
+      [[ -d "$saved_owner" ]] || continue
+      saved_name=$(basename "$saved_owner")
+      rm -rf "/opt/vpn/clients/$saved_name" "/opt/vpn/$saved_name"
+      cp -a "$saved_owner" "/opt/vpn/$saved_name"
+    done
+    rmdir /opt/vpn/clients 2>/dev/null || true
     systemctl restart --no-block sing-box || true
     printf "$(t update_failed_restored)\n" "$backup" >&2
     return 1
@@ -844,6 +860,7 @@ fi
 if (( INSTALL_STEP < 8 )); then
 step "$(t step8)"
 mkdir -p /opt/vpn/profiles /opt/vpn/traffic/daily /etc/sing-box/clients
+install -d -m 0700 /opt/vpn/clients
 
 cp "$SCRIPT_DIR/templates/template.json" /opt/vpn/template.json
 cp "$SCRIPT_DIR/templates/template-legacy.json" /opt/vpn/template-legacy.json

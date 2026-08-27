@@ -130,17 +130,28 @@ Main menu:
    - manage Reality masking domains (list / add / remove)
    - rebuild remote client profiles without restarting sing-box or nginx
 
-Each owner has a private directory under `/opt/vpn`. WireGuard configuration
-and editable per-device routing are stored together, for example:
+Each owner has a private directory under `/opt/vpn/clients`. WireGuard
+configuration and editable per-device routing are stored together, for example:
 
 ```text
-/opt/vpn/kitty/kitty_mac_wg.conf
-/opt/vpn/kitty/kitty_mac_routing.json
+/opt/vpn/clients/kitty/kitty_mac_wg.conf
+/opt/vpn/clients/kitty/kitty_mac_routing.json
 ```
+
+Existing owner directories directly under `/opt/vpn` are migrated
+transactionally on the first manager run. Conflicting files are never
+overwritten.
 
 Run `/root/sb-panel --rebuild-profiles` after editing routing manually, or use
 the corresponding service-menu command. Published modern/legacy profile URLs
 do not change.
+
+When a device uses both WireGuard and proxy transports, the manager stores a
+per-device WireGuard profile mode. WireGuard can be omitted from sing-box JSON,
+included only in the `Select` selector, or included in both `Select` and the
+`auto` urltest. The standalone WireGuard `.conf` and the server-side peer remain
+available in every mode. Existing devices without this setting retain the
+previous `Select` + `auto` behavior.
 
 Client routing files separate portable policy rules by compatibility level:
 
