@@ -1,8 +1,7 @@
 {
-  "endpoints": [ __WG_ENDPOINT__ ],
+  "endpoints": [],
   "outbounds": [
-    { "tag": "direct", "type": "direct" },
-    __OUTBOUND_TAIL__
+    { "tag": "direct", "type": "direct" }
   ],
   "route": {
     "auto_detect_interface": true,

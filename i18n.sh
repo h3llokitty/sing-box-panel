@@ -71,8 +71,8 @@ T[done_marker_warning.ru]="Переустановка приведёт к уда
 T[confirm_reinstall.en]="Are you sure you want to reinstall from scratch? [y/N] "
 T[confirm_reinstall.ru]="Вы уверены, что хотите переустановить систему с нуля? [y/N] "
 
-T[reinstall_cancelled.en]="Cancelled. Use /root/sb-panel to manage clients."
-T[reinstall_cancelled.ru]="Отменено. Для управления клиентами используйте /root/sb-panel."
+T[reinstall_cancelled.en]="Cancelled. Use /opt/vpn/sb-panel to manage clients."
+T[reinstall_cancelled.ru]="Отменено. Для управления клиентами используйте /opt/vpn/sb-panel."
 
 T[reinstall_proceeding.en]="Proceeding — removing the current installation before reinstalling..."
 T[reinstall_proceeding.ru]="Продолжение — удаление текущей установки перед переустановкой..."
@@ -293,8 +293,8 @@ T[b_dns_reminder.ru]="Убедитесь, что DNS для %s указывае�
 T[b_verify_from_a_reminder1.en]="Return to server A and test both A -> B transports before creating clients:"
 T[b_verify_from_a_reminder1.ru]="Вернитесь на сервер A и проверьте оба транспорта A -> B до создания клиентов:"
 
-T[b_verify_from_a_reminder2.en]="  /root/sb-panel -> 5 -> 6 -> 3"
-T[b_verify_from_a_reminder2.ru]="  /root/sb-panel -> 5 -> 6 -> 3"
+T[b_verify_from_a_reminder2.en]="  /opt/vpn/sb-panel -> 5 -> 6 -> 3"
+T[b_verify_from_a_reminder2.ru]="  /opt/vpn/sb-panel -> 5 -> 6 -> 3"
 
 
 # ── final instructions ──────────────────────────────────────
@@ -329,8 +329,8 @@ T[final_step2_body1.ru]="   Раздача профилей уже доступ�
 T[final_step2_body2.en]="   Open the manager and choose client creation:"
 T[final_step2_body2.ru]="   Откройте менеджер и выберите создание клиента:"
 
-T[final_step2_cmd1.en]="   /root/sb-panel"
-T[final_step2_cmd1.ru]="   /root/sb-panel"
+T[final_step2_cmd1.en]="   /opt/vpn/sb-panel"
+T[final_step2_cmd1.ru]="   /opt/vpn/sb-panel"
 
 T[final_step2_cmd2.en]="   -> 1 (create client)"
 T[final_step2_cmd2.ru]="   -> 1 (создать клиента)"
@@ -341,8 +341,8 @@ T[final_step2_check1.ru]="   При необходимости проверьт�
 T[final_step2_check2.en]="   The installation stops with diagnostics if either service is unavailable."
 T[final_step2_check2.ru]="   Если одна из служб недоступна, установка остановится и покажет диагностику."
 
-T[final_management.en]="Management: /root/sb-panel"
-T[final_management.ru]="Управление: /root/sb-panel"
+T[final_management.en]="Management: /opt/vpn/sb-panel"
+T[final_management.ru]="Управление: /opt/vpn/sb-panel"
 
 T[final_config_label.en]="Server configuration: %s"
 T[final_config_label.ru]="Конфигурация сервера: %s"
@@ -356,8 +356,8 @@ T[final_b_step_header.ru]="2) Разверните сервер B после н�
 T[final_b_verify_header.en]="3) Return to server A, test both transports and select a working route:"
 T[final_b_verify_header.ru]="3) Вернитесь на сервер A, проверьте оба транспорта и выберите рабочий маршрут:"
 
-T[final_b_verify_cmd1.en]="   /root/sb-panel"
-T[final_b_verify_cmd1.ru]="   /root/sb-panel"
+T[final_b_verify_cmd1.en]="   /opt/vpn/sb-panel"
+T[final_b_verify_cmd1.ru]="   /opt/vpn/sb-panel"
 
 T[final_b_verify_cmd2.en]="   -> 5 -> 6 -> 3"
 T[final_b_verify_cmd2.ru]="   -> 5 -> 6 -> 3"
@@ -904,6 +904,10 @@ T[wg_conf_label.ru]=".conf (WireGuard app): %s"
 
 T[client_routing_label.en]="Client routing: %s"
 T[client_routing_label.ru]="Routing клиента: %s"
+T[client_outbounds_label.en]="Client outbounds: %s"
+T[client_outbounds_label.ru]="Outbounds клиента: %s"
+T[rendered_client_outbounds.en]="Resolved endpoints and outbounds:"
+T[rendered_client_outbounds.ru]="Итоговые endpoints и outbounds:"
 
 T[client_routing_invalid_shape.en]="client routing: rule_set and rules must be arrays"
 T[client_routing_invalid_shape.ru]="routing клиента: rule_set и rules должны быть массивами"
@@ -954,6 +958,18 @@ T[modern_result.ru]="  modern: %s"
 
 T[legacy_result.en]="  legacy: %s"
 T[legacy_result.ru]="  legacy: %s"
+T[legacy_validator_missing.en]="  legacy validation unavailable: pinned sing-box 1.11.15 is not installed"
+T[legacy_validator_missing.ru]="  проверка legacy недоступна: закреплённый sing-box 1.11.15 не установлен"
+T[legacy_check_failed.en]="  legacy failed sing-box 1.11.15 check:"
+T[legacy_check_failed.ru]="  legacy не прошёл проверку sing-box 1.11.15:"
+T[legacy_validator_installing.en]="Installing the pinned sing-box 1.11.15 legacy profile validator..."
+T[legacy_validator_installing.ru]="Установка закреплённого валидатора legacy-профилей sing-box 1.11.15..."
+T[legacy_validator_ready.en]="Legacy profile validator is ready: sing-box %s"
+T[legacy_validator_ready.ru]="Валидатор legacy-профилей готов: sing-box %s"
+T[legacy_validator_arch_unsupported.en]="The legacy validator does not support architecture: %s"
+T[legacy_validator_arch_unsupported.ru]="Архитектура не поддерживается валидатором legacy: %s"
+T[legacy_validator_checksum_failed.en]="Legacy validator archive checksum verification failed."
+T[legacy_validator_checksum_failed.ru]="Не совпала контрольная сумма архива валидатора legacy."
 
 T[url_ua_label.en]="  URL (auto-selected by User-Agent):"
 T[url_ua_label.ru]="  URL (авто по User-Agent):"

@@ -1,11 +1,9 @@
 {
-    "endpoints": [
-        __WG_ENDPOINT__
-    ],
+    "endpoints": [],
     "outbounds": [
         { "tag": "direct", "type": "direct" },
         { "tag": "bypass", "type": "direct" },
-        __OUTBOUND_TAIL__
+        { "tag": "block", "type": "block" }
     ],
     "route": {
         "auto_detect_interface": true,

@@ -57,7 +57,10 @@ TEMPLATE=/opt/vpn/template.json
 SERVER_TEMPLATE=/opt/vpn/server-template.json
 SERVER_ROUTING=/opt/vpn/server-routing.json
 CLIENT_ROUTING_TEMPLATE=/opt/vpn/client-routing.json
+CLIENT_OUTBOUNDS_TEMPLATE=/opt/vpn/client-outbounds.json
 TEMPLATE_LEGACY=/opt/vpn/template-legacy.json
+CLIENT_PROFILE_RENDERER=/opt/vpn/render-client-profile.py
+LEGACY_SING_BOX=/opt/vpn/bin/sing-box-legacy
 PROFILES=/opt/vpn/profiles
 LEGACY_CLIENT_FILES_ROOT=/opt/vpn
 CLIENT_FILES_ROOT=/opt/vpn/clients
@@ -168,6 +171,10 @@ client_routing_path() {
   printf '%s/%s_routing.json' "$(client_owner_dir "$1")" "$2"
 }
 
+client_outbounds_path() {
+  printf '%s/%s_outbounds.json' "$(client_owner_dir "$1")" "$2"
+}
+
 migrate_client_files_layout() {
   local env_file owner old_dir new_dir entry target migrated=0
   local -A owners=()
@@ -243,11 +250,30 @@ ensure_client_routing() {
   printf '%s' "$routing_file"
 }
 
+ensure_client_outbounds() {
+  local owner="$1" key="$2" owner_dir outbounds_file legacy_outbounds
+  owner_dir=$(client_owner_dir "$owner")
+  outbounds_file=$(client_outbounds_path "$owner" "$key")
+  legacy_outbounds="/root/clients/${key}_outbounds.json"
+  install -d -m 0700 "$owner_dir"
+  if [[ ! -f "$outbounds_file" ]]; then
+    if [[ -f "$legacy_outbounds" ]]; then
+      install -m 0600 "$legacy_outbounds" "$outbounds_file"
+      cmp -s "$legacy_outbounds" "$outbounds_file" && rm -f "$legacy_outbounds"
+    else
+      install -m 0600 "$CLIENT_OUTBOUNDS_TEMPLATE" "$outbounds_file"
+    fi
+  fi
+  printf '%s' "$outbounds_file"
+}
+
 remove_client_artifacts() {
   local owner="$1" key="$2" owner_dir
   owner_dir=$(client_owner_dir "$owner")
-  rm -f "$(client_wg_path "$owner" "$key")" "$(client_routing_path "$owner" "$key")"
-  rm -f "/root/clients/${key}.conf" "/root/clients/${key}_wg.conf" "/root/clients/${key}_routing.json"
+  rm -f "$(client_wg_path "$owner" "$key")" "$(client_routing_path "$owner" "$key")" \
+    "$(client_outbounds_path "$owner" "$key")"
+  rm -f "/root/clients/${key}.conf" "/root/clients/${key}_wg.conf" "/root/clients/${key}_routing.json" \
+    "/root/clients/${key}_outbounds.json"
   rmdir "$owner_dir" 2>/dev/null || true
 }
 
@@ -262,6 +288,9 @@ move_client_artifacts() {
   [[ -f "$old_file" ]] && mv -f "$old_file" "$new_file"
   old_file=$(client_routing_path "$old_owner" "$old_key")
   new_file=$(client_routing_path "$new_owner" "$new_key")
+  [[ -f "$old_file" ]] && mv -f "$old_file" "$new_file"
+  old_file=$(client_outbounds_path "$old_owner" "$old_key")
+  new_file=$(client_outbounds_path "$new_owner" "$new_key")
   [[ -f "$old_file" ]] && mv -f "$old_file" "$new_file"
   rmdir "$old_dir" 2>/dev/null || true
 }
@@ -438,75 +467,6 @@ PYEOF
   write_nginx_stream
 }
 
-wg_endpoint_json() {
-  AIPS=$(aips_ipv4_only "${AIPS:-}")
-  [[ -z "${AIPS:-}" ]] && AIPS="$AIPS_FULL"
-  cat <<WG
-{ "type": "wireguard", "tag": "${A_DOMAIN}_${PROFILE}_wg", "system": false, "mtu": 1280,
-  "address": ["${WG_NET}.${IP}/24"], "private_key": "${WG_PRIV}",
-  "peers": [ { "address": "${A_IP}", "port": ${WG_PORT}, "public_key": "${A_PUB}",
-    "pre_shared_key": "${WG_PSK}", "allowed_ips": [${AIPS}], "persistent_keepalive_interval": 25 } ] }
-WG
-}
-hy2_outbound_json() {
-  cat <<HY
-{ "type": "hysteria2", "tag": "${A_DOMAIN}_${PROFILE}_hy2", "server": "${A_DOMAIN}", "server_port": ${HY2_PORT},
-  "password": "${PASS}", "obfs": { "type": "salamander", "password": "${HY2_OBFS}" },
-  "tls": { "enabled": true, "server_name": "${A_DOMAIN}", "alpn": ["h3"] } }
-HY
-}
-
-# генерирует ОДИН блок для конкретного домена: $1=домен
-vless_outbound_json_for_domain() {
-  local dom="$1"
-  cat <<VL
-{ "type": "vless", "tag": "${dom}_${PROFILE}_vless", "server": "${A_DOMAIN}", "server_port": ${VLESS_PORT},
-  "uuid": "${VLESS_UUID}", "flow": "xtls-rprx-vision",
-  "tls": { "enabled": true, "server_name": "${dom}",
-    "utls": { "enabled": true, "fingerprint": "chrome" },
-    "reality": { "enabled": true, "public_key": "${REALITY_PUB}", "short_id": "${REALITY_SID}" } } }
-VL
-}
-
-# печатает блоки для ВСЕХ активных доменов, через запятую с переносом (для вставки в массив outbounds)
-vless_outbound_json() {
-  local vd_line vd_dom first=1
-  local -a vd_all
-  mapfile -t vd_all < <(list_vless_domains)
-  for vd_line in "${vd_all[@]}"; do
-    vd_dom="${vd_line%%:*}"
-    [[ $first -eq 0 ]] && printf ',\n'
-    vless_outbound_json_for_domain "$vd_dom"
-    first=0
-  done
-}
-
-# список тегов VLESS (по одному на домен) — нужен для selector/urltest
-vless_tags() {
-  local vd_line vd_dom
-  local -a vd_all
-  mapfile -t vd_all < <(list_vless_domains)
-  for vd_line in "${vd_all[@]}"; do
-    vd_dom="${vd_line%%:*}"
-    echo "${vd_dom}_${PROFILE}_vless"
-  done
-}
-
-outbound_json_for() {
-  case "$1" in
-    hy2) hy2_outbound_json ;;
-    vless) vless_outbound_json ;;
-    *) printf -- "$(t unknown_proxy_type)\n" "$1" >&2; return 1 ;;
-  esac
-}
-
-client_proxy_types() {
-  local types=""
-  if [[ -n "${PASS:-}" ]]; then types+="hy2 "; fi
-  if [[ -n "${VLESS_UUID:-}" ]]; then types+="vless "; fi
-  echo "$types"
-}
-
 wg_profile_mode() {
   case "${WG_PROFILE_MODE:-urltest}" in
     disabled|selector|urltest) printf '%s' "${WG_PROFILE_MODE:-urltest}" ;;
@@ -542,83 +502,6 @@ prompt_wg_profile_mode() {
   esac
 }
 
-
-# по типу прокси-протокола строит полный тег с доменом (WG/Hy2 -> A_DOMAIN, VLESS -> VLESS_DEST)
-proxy_tag_for() {  # $1 = wg | hy2 | vless
-  case "$1" in
-    wg)    echo "${A_DOMAIN}_${PROFILE}_wg" ;;
-    hy2)   echo "${A_DOMAIN}_${PROFILE}_hy2" ;;
-    vless) echo "${VLESS_DEST}_${PROFILE}_vless" ;;
-    *) echo "${PROFILE}_${1}" ;;
-  esac
-}
-
-urltest_json() {
-  local opts="" first=1 tag count=0 proxy_count=0
-  if wg_urltest_enabled; then
-    tag=$(proxy_tag_for wg)
-    opts+="\"${tag}\""
-    first=0
-    count=$((count+1))
-  fi
-  while IFS= read -r tag; do
-    [[ -z "$tag" ]] && continue
-    [[ $first -eq 0 ]] && opts+=","
-    opts+="\"${tag}\""
-    first=0
-    count=$((count+1))
-    proxy_count=$((proxy_count+1))
-  done < <(all_proxy_tags)
-  [[ $count -lt 1 || $proxy_count -lt 1 ]] && return 1
-  cat <<UT
-{ "type": "urltest", "tag": "auto",
-  "outbounds": [ ${opts} ],
-  "url": "https://www.gstatic.com/generate_204",
-  "interval": "15m",
-  "tolerance": 100 }
-UT
-}
-
-# все теги proxy-протоколов клиента: hy2 -> 1 тег, vless -> N тегов (по числу доменов)
-all_proxy_tags() {
-  local pt tag
-  for pt in $(client_proxy_types); do
-    if [[ "$pt" == "vless" ]]; then
-      vless_tags
-    else
-      echo "${A_DOMAIN}_${PROFILE}_${pt}"
-    fi
-  done
-}
-
-selector_json() {
-  local opts="" first=1 def_tag="" tag proxy_count=0
-  if wg_profile_enabled; then
-    tag=$(proxy_tag_for wg)
-    opts+="\"${tag}\""
-    first=0
-    def_tag="${tag}"
-  fi
-  while IFS= read -r tag; do
-    [[ -z "$tag" ]] && continue
-    [[ $first -eq 0 ]] && opts+=","
-    opts+="\"${tag}\""
-    first=0
-    def_tag="${tag}"
-    proxy_count=$((proxy_count+1))
-  done < <(all_proxy_tags)
-  if (( proxy_count >= 1 )); then
-    [[ $first -eq 0 ]] && opts+=","
-    opts+="\"auto\""
-    def_tag="auto"
-  fi
-  cat <<SEL
-{ "type": "selector", "tag": "Select",
-  "outbounds": [ ${opts} ],
-  "default": "${def_tag}" }
-SEL
-}
-
 gen_wg_conf() {
   AIPS=$(aips_ipv4_only "${AIPS:-}")
   [[ -z "${AIPS:-}" ]] && AIPS="$AIPS_FULL"
@@ -652,148 +535,73 @@ CONF
 }
 
 gen_profile() {
-  local wg="" sel base tail proxies="" pt block first=1 routing_file
+  local base routing_file outbounds_file modern_new legacy_new modern_ok=0 legacy_ok=0
   routing_file=$(ensure_client_routing "$NAME" "$KEY")
-  if wg_profile_enabled; then
-    wg=$(wg_endpoint_json)
-  fi
+  outbounds_file=$(ensure_client_outbounds "$NAME" "$KEY")
   if [[ -n "${WG_PUB:-}" ]]; then
     gen_wg_conf >/dev/null
   else
     rm -f "$(client_wg_path "$NAME" "$KEY")"
   fi
-  for pt in $(client_proxy_types); do
-    block=$(outbound_json_for "$pt")
-    [[ $first -eq 0 ]] && proxies+=",
-"
-    proxies+="$block"
-    first=0
-  done
-  local ut; ut=$(urltest_json) || ut=""
-  sel=$(selector_json)
-  if [[ -n "$proxies" && -n "$ut" ]]; then
-    tail="${proxies},
-${ut},
-${sel}"
-  elif [[ -n "$proxies" ]]; then
-    tail="${proxies},
-${sel}"
-  else
-    tail="${sel}"
-  fi
   base="$PROFILES/${KEY}_${TOKEN}"
 
-  local routing_shape_error modern_new="${base}-modern.json.new"
-  routing_shape_error=$(t client_routing_invalid_shape)
-  if ! python3 - "$TEMPLATE" "$modern_new" "$routing_file" "$routing_shape_error" <<PYEOF
-import sys, json
-tmpl, out, routing, shape_error = sys.argv[1:5]
-wg = """$wg"""; tail = """$tail"""
-s = open(tmpl).read()
-s = s.replace("__WG_ENDPOINT__", wg.strip())
-s = s.replace("__OUTBOUND_TAIL__", tail.strip())
-s = s.replace("__A_DOMAIN__", """$A_DOMAIN""")
-s = s.replace("__A_IP__", """$A_IP""")
-s = s.replace("__VLESS_DEST__", """$VLESS_DEST""")
-s = s.replace("__CACHE_ID__", """${KEY}_${TOKEN}""")
-config = json.loads(s)
-dns_domains = config["dns"]["rules"][0].setdefault("domain", [])
-for domain in ("""$A_DOMAIN""", """$VLESS_DEST"""):
-    if domain and domain not in dns_domains:
-        dns_domains.append(domain)
-for outbound in config["outbounds"]:
-    if outbound.get("type") in ("urltest", "selector"):
-        values = outbound.get("outbounds", [])
-        wg_tags = [tag for tag in values if tag.endswith("_wg")]
-        automatic = [tag for tag in values if tag == "auto"]
-        remaining = [tag for tag in values if tag not in wg_tags and tag != "auto"]
-        outbound["outbounds"] = remaining + wg_tags + automatic
-with open(routing) as routing_file:
-    policy = json.load(routing_file)
-rule_sets = policy.get("rule_set", [])
-common_rules = policy.get("common_rules", [])
-variant_rules = policy.get("modern_rules", [])
-rules = policy.get("rules", [])
-if not all(isinstance(value, list) for value in (rule_sets, common_rules, variant_rules, rules)):
-    raise ValueError(shape_error)
-config["route"]["rule_set"].extend(rule_sets)
-config["route"]["rules"].extend(common_rules)
-config["route"]["rules"].extend(variant_rules)
-config["route"]["rules"].extend(rules)
-with open(out, "w") as output_file:
-    json.dump(config, output_file, indent=2)
-    output_file.write("\n")
-PYEOF
-  then
-    echo "$(t json_error_modern)"; rm -f "$modern_new"; local modern_ok=0
+  AIPS=$(aips_ipv4_only "${AIPS:-}")
+  [[ -z "${AIPS:-}" ]] && AIPS="$AIPS_FULL"
+  export SBP_A_DOMAIN="$A_DOMAIN" SBP_A_IP="$A_IP" SBP_CACHE_ID="${KEY}_${TOKEN}"
+  export SBP_VLESS_DEST="$VLESS_DEST" SBP_PROFILE="$PROFILE"
+  export SBP_WG_TAG="${A_DOMAIN}_${PROFILE}_wg" SBP_WG_ADDRESS="${WG_NET}.${IP}/24"
+  export SBP_WG_PRIVATE_KEY="${WG_PRIV:-}" SBP_WG_PUBLIC_KEY="$A_PUB" SBP_WG_PRESHARED_KEY="$WG_PSK"
+  export SBP_WG_PORT="$WG_PORT" SBP_WG_ALLOWED_IPS="[$AIPS]" SBP_WG_PROFILE_MODE="$(wg_profile_mode)"
+  export SBP_HY2_TAG="${A_DOMAIN}_${PROFILE}_hy2" SBP_HY2_PORT="$HY2_PORT"
+  export SBP_HY2_PASSWORD="${PASS:-}" SBP_HY2_OBFS="$HY2_OBFS"
+  export SBP_VLESS_PORT="$VLESS_PORT" SBP_VLESS_UUID="${VLESS_UUID:-}"
+  export SBP_REALITY_PUBLIC_KEY="$REALITY_PUB" SBP_REALITY_SHORT_ID="$REALITY_SID"
+  export SBP_WG_ENABLED=0 SBP_HY2_ENABLED=0 SBP_VLESS_ENABLED=0
+  if wg_profile_enabled; then SBP_WG_ENABLED=1; fi
+  if [[ -n "${PASS:-}" ]]; then SBP_HY2_ENABLED=1; fi
+  if [[ -n "${VLESS_UUID:-}" ]]; then SBP_VLESS_ENABLED=1; fi
+  export SBP_WG_ENABLED SBP_HY2_ENABLED SBP_VLESS_ENABLED
+  SBP_VLESS_DOMAINS=$(list_vless_domains | cut -d: -f1)
+  export SBP_VLESS_DOMAINS
+
+  modern_new="${base}-modern.json.new"
+  if ! python3 "$CLIENT_PROFILE_RENDERER" --variant modern --template "$TEMPLATE" \
+      --routing "$routing_file" --outbounds "$outbounds_file" --output "$modern_new"; then
+    echo "$(t json_error_modern)"
+    rm -f "$modern_new"
   elif ! sing-box check -c "$modern_new" >/dev/null 2>&1; then
     echo "$(t modern_check_failed)"
     sing-box check -c "$modern_new" 2>&1 | grep -v WARN | head -4 || true
-    rm -f "$modern_new"; local modern_ok=0
+    rm -f "$modern_new"
   else
     mv -f "$modern_new" "${base}-modern.json"
-    local modern_ok=1
+    modern_ok=1
   fi
 
-  local legacy_new="${base}-legacy.json.new" legacy_ok=1
-  if ! python3 - "$TEMPLATE_LEGACY" "$legacy_new" "$routing_file" "$routing_shape_error" <<PYEOF
-import sys, json
-tmpl, out, routing, shape_error = sys.argv[1:5]
-wg = """$wg"""; tail = """$tail"""
-s = open(tmpl).read()
-s = s.replace("__WG_ENDPOINT__", wg.strip())
-s = s.replace("__OUTBOUND_TAIL__", tail.strip())
-s = s.replace("__A_DOMAIN__", """$A_DOMAIN""")
-s = s.replace("__A_IP__", """$A_IP""")
-s = s.replace("__VLESS_DEST__", """$VLESS_DEST""")
-s = s.replace("__CACHE_ID__", """${KEY}_${TOKEN}""")
-config = json.loads(s)
-dns_domains = config["dns"]["rules"][0].setdefault("domain", [])
-for domain in ("""$A_DOMAIN""", """$VLESS_DEST"""):
-    if domain and domain not in dns_domains:
-        dns_domains.append(domain)
-for outbound in config["outbounds"]:
-    if outbound.get("type") in ("urltest", "selector"):
-        values = outbound.get("outbounds", [])
-        wg_tags = [tag for tag in values if tag.endswith("_wg")]
-        automatic = [tag for tag in values if tag == "auto"]
-        remaining = [tag for tag in values if tag not in wg_tags and tag != "auto"]
-        outbound["outbounds"] = remaining + wg_tags + automatic
-with open(routing) as routing_file:
-    policy = json.load(routing_file)
-rule_sets = policy.get("rule_set", [])
-common_rules = policy.get("common_rules", [])
-variant_rules = policy.get("legacy_rules", [])
-rules = policy.get("rules", [])
-if not all(isinstance(value, list) for value in (rule_sets, common_rules, variant_rules, rules)):
-    raise ValueError(shape_error)
-config["route"]["rule_set"].extend(rule_sets)
-config["route"]["rules"].extend(common_rules)
-config["route"]["rules"].extend(variant_rules)
-config["route"]["rules"].extend(rules)
-with open(out, "w") as output_file:
-    json.dump(config, output_file, indent=2)
-    output_file.write("\n")
-PYEOF
-  then
-    echo "$(t json_error_legacy)"; rm -f "$legacy_new"; legacy_ok=0
+  legacy_new="${base}-legacy.json.new"
+  if ! python3 "$CLIENT_PROFILE_RENDERER" --variant legacy --template "$TEMPLATE_LEGACY" \
+      --routing "$routing_file" --outbounds "$outbounds_file" --output "$legacy_new"; then
+    echo "$(t json_error_legacy)"
+    rm -f "$legacy_new"
+  elif [[ ! -x "$LEGACY_SING_BOX" ]]; then
+    echo "$(t legacy_validator_missing)"
+    rm -f "$legacy_new"
+  elif ! "$LEGACY_SING_BOX" check -c "$legacy_new" >/dev/null 2>&1; then
+    echo "$(t legacy_check_failed)"
+    "$LEGACY_SING_BOX" check -c "$legacy_new" 2>&1 | grep -v WARN | head -4 || true
+    rm -f "$legacy_new"
   else
     mv -f "$legacy_new" "${base}-legacy.json"
+    legacy_ok=1
   fi
 
   if [[ $modern_ok -eq 0 && $legacy_ok -eq 0 ]]; then
-    echo "$(t both_variants_failed)"; return 1
+    echo "$(t both_variants_failed)"
+    return 1
   fi
-
-  if command -v jq >/dev/null 2>&1; then
-    for f in "${base}-modern.json" "${base}-legacy.json"; do
-      [[ -f "$f" ]] && { jq . "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"; }
-    done
-  fi
-  chmod 644 "${base}-modern.json" "${base}-legacy.json" 2>/dev/null || true
-
+  chmod 0644 "${base}-modern.json" "${base}-legacy.json" 2>/dev/null || true
   printf -- "$(t modern_result)\n" "$([[ $modern_ok -eq 1 ]] && t ok_word || t failed_see_above)"
-  printf -- "$(t legacy_result)\n" "$([[ $legacy_ok -eq 1 ]] && t ok_word || t no_word)"
+  printf -- "$(t legacy_result)\n" "$([[ $legacy_ok -eq 1 ]] && t ok_word || t failed_see_above)"
 
   local url enc
   url="https://${PROFILE_HOST}:${PROFILE_PORT}/${KEY}_${TOKEN}.json"
@@ -847,45 +655,23 @@ emit_client() {
     printf -- "$(t wg_conf_label)\n" "$cf"
     printf -- "$(t wg_profile_mode_label)\n" "$(t "wg_profile_mode_$(wg_profile_mode)_short")"
     echo
-    if wg_profile_enabled; then
-      echo "$(t block_wg_endpoint)"
-      wg_endpoint_json | (jq . 2>/dev/null || cat)
-      echo
-    fi
   fi
   local routing_file
   routing_file=$(ensure_client_routing "$NAME" "$KEY")
   printf -- "$(t client_routing_label)\n" "$routing_file"
-  echo
-  local pt
-  for pt in $(client_proxy_types); do
-    if [[ "$pt" == "vless" ]]; then
-      local vd_line vd_dom
-      local -a vd_all
-      mapfile -t vd_all < <(list_vless_domains)
-      for vd_line in "${vd_all[@]}"; do
-        vd_dom="${vd_line%%:*}"
-        printf -- "$(t block_vless_outbound_domain)\n" "${vd_dom}"
-        vless_outbound_json_for_domain "$vd_dom" | (jq . 2>/dev/null || cat)
-        echo
-      done
-    else
-      printf -- "$(t block_outbound_generic)\n" "${pt}"
-      outbound_json_for "$pt" | (jq . 2>/dev/null || cat)
-      echo
-    fi
-  done
-  local ut_preview; ut_preview=$(urltest_json 2>/dev/null) || ut_preview=""
-  if [[ -n "$ut_preview" ]]; then
-    echo "$(t block_urltest)"
-    echo "$ut_preview" | (jq . 2>/dev/null || cat)
-    echo
-  fi
-  echo "$(t block_selector)"
-  selector_json | (jq . 2>/dev/null || cat)
+  local outbounds_file
+  outbounds_file=$(ensure_client_outbounds "$NAME" "$KEY")
+  printf -- "$(t client_outbounds_label)\n" "$outbounds_file"
   echo
   echo "$(t profile_url_label)"
-  gen_profile
+  gen_profile || return
+  local rendered="$PROFILES/${KEY}_${TOKEN}-modern.json"
+  [[ -f "$rendered" ]] || rendered="$PROFILES/${KEY}_${TOKEN}-legacy.json"
+  if [[ -f "$rendered" ]]; then
+    echo
+    echo "$(t rendered_client_outbounds)"
+    jq '.endpoints[]?, .outbounds[]? | select(.tag != "direct" and .tag != "bypass" and .tag != "block")' "$rendered"
+  fi
 }
 
 list_names() {

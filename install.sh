@@ -28,6 +28,10 @@ INSTALL_STATE_FILE=$INSTALL_STATE_DIR/install-step
 SING_BOX_REV_FILE=/usr/lib/sing-box-panel/sing-box-revision
 SING_BOX_SHA_FILE=/usr/lib/sing-box-panel/sing-box-sha256
 SING_BOX_BIN=/usr/local/lib/sing-box-panel/sing-box
+LEGACY_VALIDATOR_VERSION=1.11.15
+LEGACY_VALIDATOR_BIN=/opt/vpn/bin/sing-box-legacy
+LEGACY_VALIDATOR_SHA_AMD64=950af37eb2d7e55dddae34a18411cd617303fd99d2dc75bc76b6dd9fcd97d9c5
+LEGACY_VALIDATOR_SHA_ARM64=20a6a9cd259a95411599f811a5066513a98db63705a51121252ad27daf96c029
 
 # Do not let needrestart terminate the SSH session during package installation.
 export NEEDRESTART_MODE=l
@@ -75,6 +79,46 @@ sing_box_build_is_verified() {
   [[ "$(cat "$SING_BOX_REV_FILE")" == "$SING_BOX_REV" ]] || return 1
   [[ "$(sha256sum "$SING_BOX_BIN" | awk '{print $1}')" == "$(cat "$SING_BOX_SHA_FILE")" ]] || return 1
   "$SING_BOX_BIN" version | grep -qi v2ray
+}
+
+install_legacy_validator() {
+  local arch archive_arch expected tmp archive extracted version
+  arch=$(dpkg --print-architecture)
+  case "$arch" in
+    amd64) archive_arch=amd64; expected="$LEGACY_VALIDATOR_SHA_AMD64" ;;
+    arm64) archive_arch=arm64; expected="$LEGACY_VALIDATOR_SHA_ARM64" ;;
+    *) printf -- "$(t legacy_validator_arch_unsupported)\n" "$arch" >&2; return 1 ;;
+  esac
+  if [[ -x "$LEGACY_VALIDATOR_BIN" ]]; then
+    version=$("$LEGACY_VALIDATOR_BIN" version 2>/dev/null | sed -n '1s/^sing-box version //p')
+    if [[ "$version" == "$LEGACY_VALIDATOR_VERSION" ]]; then
+      printf -- "$(t legacy_validator_ready)\n" "$version"
+      return 0
+    fi
+  fi
+  echo "$(t legacy_validator_installing)"
+  tmp=$(mktemp -d)
+  archive="$tmp/sing-box.tar.gz"
+  extracted="$tmp/sing-box-${LEGACY_VALIDATOR_VERSION}-linux-${archive_arch}/sing-box"
+  if ! curl -fL --retry 3 --connect-timeout 15 \
+      "https://github.com/SagerNet/sing-box/releases/download/v${LEGACY_VALIDATOR_VERSION}/sing-box-${LEGACY_VALIDATOR_VERSION}-linux-${archive_arch}.tar.gz" \
+      -o "$archive"; then
+    rm -rf "$tmp"
+    return 1
+  fi
+  if [[ "$(sha256sum "$archive" | awk '{print $1}')" != "$expected" ]]; then
+    rm -rf "$tmp"
+    echo "$(t legacy_validator_checksum_failed)" >&2
+    return 1
+  fi
+  tar -xzf "$archive" -C "$tmp"
+  install -d -m 0755 "$(dirname "$LEGACY_VALIDATOR_BIN")"
+  install -m 0755 "$extracted" "${LEGACY_VALIDATOR_BIN}.new"
+  mv -f "${LEGACY_VALIDATOR_BIN}.new" "$LEGACY_VALIDATOR_BIN"
+  rm -rf "$tmp"
+  version=$("$LEGACY_VALIDATOR_BIN" version | sed -n '1s/^sing-box version //p')
+  [[ "$version" == "$LEGACY_VALIDATOR_VERSION" ]] || return 1
+  printf -- "$(t legacy_validator_ready)\n" "$version"
 }
 
 installation_failed() {
@@ -298,15 +342,21 @@ update_existing_install() {
   bash -n "$SCRIPT_DIR/vpn-setup.sh" "$SCRIPT_DIR/i18n.sh" "$SCRIPT_DIR/install-warp.sh"
   jq empty "$SCRIPT_DIR/templates/server-routing.json"
   jq empty "$SCRIPT_DIR/templates/client-routing.json"
+  jq empty "$SCRIPT_DIR/templates/client-outbounds.json"
+  jq empty "$SCRIPT_DIR/templates/template.json" "$SCRIPT_DIR/templates/template-legacy.json"
+  PYTHONPYCACHEPREFIX=/tmp/sing-box-panel-pycache python3 -m py_compile "$SCRIPT_DIR/render-client-profile.py"
+  install_legacy_validator
 
   local stamp backup
   stamp=$(date +%Y%m%d%H%M%S)
-  backup="/root/vpn-update-backup-${stamp}"
+  backup="/opt/vpn/backups/update-${stamp}"
   install -d -m 0700 "$backup/root" "$backup/opt-vpn"
+  # Keep old /root copies only for rollback during the one-time layout migration.
   [[ -f /root/vpn-setup.sh ]] && cp -a /root/vpn-setup.sh "$backup/root/"
   [[ -f /root/i18n.sh ]] && cp -a /root/i18n.sh "$backup/root/"
+  [[ -f /root/sb-panel ]] && cp -a /root/sb-panel "$backup/root/"
   local file
-  for file in i18n.sh template.json template-legacy.json stats.proto server-template.json server-routing.json client-routing.json; do
+  for file in sb-panel vpn-setup.sh i18n.sh template.json template-legacy.json client-outbounds.json render-client-profile.py stats.proto server-template.json server-routing.json client-routing.json; do
     [[ -f "/opt/vpn/$file" ]] && cp -a "/opt/vpn/$file" "$backup/opt-vpn/"
   done
   [[ -f /etc/sing-box/config.json ]] && cp -a /etc/sing-box/config.json "$backup/config.json"
@@ -319,11 +369,17 @@ update_existing_install() {
     cp -a "/opt/vpn/$owner" "$backup/client-layout/$owner"
   done
 
-  install -m 0755 "$SCRIPT_DIR/vpn-setup.sh" /root/vpn-setup.sh
-  install -m 0644 "$SCRIPT_DIR/i18n.sh" /root/i18n.sh
+  install -m 0755 "$SCRIPT_DIR/vpn-setup.sh" /opt/vpn/vpn-setup.sh
   install -m 0644 "$SCRIPT_DIR/i18n.sh" /opt/vpn/i18n.sh
+  cat > /opt/vpn/sb-panel <<'EOF'
+#!/usr/bin/env bash
+VPN_CONFIG=/etc/sing-box/vpn-panel.env exec /opt/vpn/vpn-setup.sh "$@"
+EOF
+  chmod 0755 /opt/vpn/sb-panel
   install -m 0644 "$SCRIPT_DIR/templates/template.json" /opt/vpn/template.json
   install -m 0644 "$SCRIPT_DIR/templates/template-legacy.json" /opt/vpn/template-legacy.json
+  install -m 0644 "$SCRIPT_DIR/templates/client-outbounds.json" /opt/vpn/client-outbounds.json
+  install -m 0755 "$SCRIPT_DIR/render-client-profile.py" /opt/vpn/render-client-profile.py
   install -m 0644 "$SCRIPT_DIR/templates/stats.proto" /opt/vpn/stats.proto
   install -m 0644 "$SCRIPT_DIR/templates/server-template.json" /opt/vpn/server-template.json
   if [[ "$replace_routing" == "1" ]]; then
@@ -343,11 +399,13 @@ update_existing_install() {
     echo "$(t client_routing_kept)"
   fi
 
-  if ! VPN_CONFIG=/etc/sing-box/vpn-panel.env /root/vpn-setup.sh --rebuild-config; then
-    [[ -f "$backup/root/vpn-setup.sh" ]] && cp -a "$backup/root/vpn-setup.sh" /root/vpn-setup.sh
-    [[ -f "$backup/root/i18n.sh" ]] && cp -a "$backup/root/i18n.sh" /root/i18n.sh
-    for file in i18n.sh template.json template-legacy.json stats.proto server-template.json server-routing.json client-routing.json; do
-      [[ -f "$backup/opt-vpn/$file" ]] && cp -a "$backup/opt-vpn/$file" "/opt/vpn/$file"
+  if ! VPN_CONFIG=/etc/sing-box/vpn-panel.env /opt/vpn/vpn-setup.sh --rebuild-config; then
+    for file in sb-panel vpn-setup.sh i18n.sh template.json template-legacy.json client-outbounds.json render-client-profile.py stats.proto server-template.json server-routing.json client-routing.json; do
+      if [[ -f "$backup/opt-vpn/$file" ]]; then
+        cp -a "$backup/opt-vpn/$file" "/opt/vpn/$file"
+      else
+        rm -f "/opt/vpn/$file"
+      fi
     done
     [[ -f "$backup/config.json" ]] && cp -a "$backup/config.json" /etc/sing-box/config.json
     local saved_owner saved_name
@@ -362,6 +420,8 @@ update_existing_install() {
     printf "$(t update_failed_restored)\n" "$backup" >&2
     return 1
   fi
+
+  rm -f /root/sb-panel /root/vpn-setup.sh /root/i18n.sh
 
   printf "$(t update_completed)\n" "$backup"
 }
@@ -447,8 +507,8 @@ if (( INSTALL_STEP < 3 )); then
   if sing_box_build_is_verified; then
     printf "$(t build_reused)\n" "$SING_BOX_REV"
   else
-    mkdir -p /root/build
-    SING_BOX_SOURCE_DIR="/root/build/sing-box-${SING_BOX_REV:0:12}"
+    mkdir -p /opt/vpn/build
+    SING_BOX_SOURCE_DIR="/opt/vpn/build/sing-box-${SING_BOX_REV:0:12}"
     if [[ ! -d "$SING_BOX_SOURCE_DIR/.git" ]]; then
       git clone --filter=blob:none --no-checkout https://github.com/SagerNet/sing-box.git "$SING_BOX_SOURCE_DIR"
     fi
@@ -457,11 +517,11 @@ if (( INSTALL_STEP < 3 )); then
     [[ "$(git -C "$SING_BOX_SOURCE_DIR" rev-parse HEAD)" == "$SING_BOX_REV" ]] || { echo "$(t build_revision_mismatch)"; exit 1; }
     (cd "$SING_BOX_SOURCE_DIR" && go build -v -trimpath \
       -tags "with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_v2ray_api,with_grpc,with_tailscale" \
-      -o /root/build/sing-box-new ./cmd/sing-box)
-    [[ -x /root/build/sing-box-new ]] || { echo "$(t build_failed)"; exit 1; }
+      -o /opt/vpn/build/sing-box-new ./cmd/sing-box)
+    [[ -x /opt/vpn/build/sing-box-new ]] || { echo "$(t build_failed)"; exit 1; }
     mkdir -p "$(dirname "$SING_BOX_BIN")" /usr/local/bin
     [[ -f "$SING_BOX_BIN" ]] && cp "$SING_BOX_BIN" "${SING_BOX_BIN}.bak" 2>/dev/null || true
-    install -m 0755 /root/build/sing-box-new "$SING_BOX_BIN"
+    install -m 0755 /opt/vpn/build/sing-box-new "$SING_BOX_BIN"
     ln -sfn "$SING_BOX_BIN" /usr/local/bin/sing-box
     "$SING_BOX_BIN" version | grep -qi v2ray || { echo "$(t v2ray_api_missing)"; exit 1; }
     mkdir -p "$(dirname "$SING_BOX_REV_FILE")"
@@ -859,11 +919,19 @@ fi
 
 if (( INSTALL_STEP < 8 )); then
 step "$(t step8)"
+  bash -n "$SCRIPT_DIR/vpn-setup.sh" "$SCRIPT_DIR/i18n.sh" "$SCRIPT_DIR/install-warp.sh"
+  jq empty "$SCRIPT_DIR/templates/server-routing.json"
+  jq empty "$SCRIPT_DIR/templates/client-routing.json"
+  jq empty "$SCRIPT_DIR/templates/client-outbounds.json"
+  jq empty "$SCRIPT_DIR/templates/template.json" "$SCRIPT_DIR/templates/template-legacy.json"
+  PYTHONPYCACHEPREFIX=/tmp/sing-box-panel-pycache python3 -m py_compile "$SCRIPT_DIR/render-client-profile.py"
 mkdir -p /opt/vpn/profiles /opt/vpn/traffic/daily /etc/sing-box/clients
 install -d -m 0700 /opt/vpn/clients
 
 cp "$SCRIPT_DIR/templates/template.json" /opt/vpn/template.json
 cp "$SCRIPT_DIR/templates/template-legacy.json" /opt/vpn/template-legacy.json
+cp "$SCRIPT_DIR/templates/client-outbounds.json" /opt/vpn/client-outbounds.json
+install -m 0755 "$SCRIPT_DIR/render-client-profile.py" /opt/vpn/render-client-profile.py
 cp "$SCRIPT_DIR/templates/stats.proto" /opt/vpn/stats.proto
 cp "$SCRIPT_DIR/templates/server-template.json" /opt/vpn/server-template.json
 render_routing_template "$SCRIPT_DIR/templates/server-routing.json" /opt/vpn/server-routing.json \
@@ -871,15 +939,16 @@ render_routing_template "$SCRIPT_DIR/templates/server-routing.json" /opt/vpn/ser
 render_routing_template "$SCRIPT_DIR/templates/client-routing.json" /opt/vpn/client-routing.json \
   "${RU_RULES_ENABLED:-0}" "${RULESET_BASE_URL:-}" "direct"
 chmod 0644 /opt/vpn/server-routing.json /opt/vpn/client-routing.json
+chmod 0644 /opt/vpn/client-outbounds.json
+install_legacy_validator
 
 # удобные симлинки для навигации из /opt/vpn (не меняют реальные пути в коде)
 ln -sf /etc/sing-box /opt/vpn/sing-box
 ln -sf /etc/nginx /opt/vpn/nginx
-cp "$SCRIPT_DIR/vpn-setup.sh" /root/vpn-setup.sh
-cp "$SCRIPT_DIR/i18n.sh" /root/i18n.sh
+cp "$SCRIPT_DIR/vpn-setup.sh" /opt/vpn/vpn-setup.sh
 cp "$SCRIPT_DIR/i18n.sh" /opt/vpn/i18n.sh
 chmod 644 /opt/vpn/i18n.sh
-chmod +x /root/vpn-setup.sh
+chmod +x /opt/vpn/vpn-setup.sh
 
 if [[ -n "${WARP_INSTALL_PATH:-}" && "$WARP_INSTALL_PATH" == /opt/vpn/profiles/install-warp-*.sh && -f "$WARP_INSTALL_PATH" ]]; then
   printf "$(t generated_warp_reused)\n" "$WARP_INSTALL_PATH"
@@ -892,14 +961,14 @@ else
   printf 'WARP_INSTALL_PATH="%s"\n' "$WARP_INSTALL_PATH" >> "$CONFIG_ENV"
 fi
 
-cat > /root/sb-panel <<EOF
+cat > /opt/vpn/sb-panel <<EOF
 #!/usr/bin/env bash
-VPN_CONFIG=$CONFIG_ENV exec /root/vpn-setup.sh "\$@"
+VPN_CONFIG=$CONFIG_ENV exec /opt/vpn/vpn-setup.sh "\$@"
 EOF
-chmod +x /root/sb-panel
+chmod +x /opt/vpn/sb-panel
 
 echo "$(t building_initial_config)"
-if ! VPN_CONFIG="$CONFIG_ENV" /root/vpn-setup.sh --rebuild-config; then
+if ! VPN_CONFIG="$CONFIG_ENV" /opt/vpn/vpn-setup.sh --rebuild-config; then
   echo "$(t singbox_start_failed)"
   journalctl -u sing-box -n 40 --no-pager || true
   exit 1
@@ -916,12 +985,13 @@ fi
 
 if [[ "${B_NEEDS_INSTALL:-0}" != "1" ]]; then
   echo
-  if ! VPN_CONFIG="$CONFIG_ENV" /root/vpn-setup.sh --test-b-transports; then
+  if ! VPN_CONFIG="$CONFIG_ENV" /opt/vpn/vpn-setup.sh --test-b-transports; then
     echo "$(t existing_b_transport_warning)"
   fi
 else
   echo "$(t generated_b_transport_pending)"
 fi
+rm -f /root/sb-panel /root/vpn-setup.sh /root/i18n.sh
 complete_install_step 8
 else
   printf "$(t step_skipped)\n" 8
@@ -1052,7 +1122,7 @@ if [[ -n "${B_INSTALL_PATH:-}" ]]; then
   echo "$(t binary_publish_ready)"
 fi
 
-(crontab -l 2>/dev/null | grep -v 'cron-traffic' || true; echo "*/15 * * * * /usr/bin/bash /root/vpn-setup.sh --cron-traffic >/dev/null 2>&1") | crontab -
+(crontab -l 2>/dev/null | grep -v 'cron-traffic' || true; echo "*/15 * * * * /usr/bin/bash /opt/vpn/vpn-setup.sh --cron-traffic >/dev/null 2>&1") | crontab -
 
 complete_install_step 9
 else
@@ -1065,7 +1135,7 @@ date > "$DONE_MARKER"
 trap - ERR
 
 step "$(t done_step)"
-SUMMARY_FILE=/root/install-summary.txt
+SUMMARY_FILE=/opt/vpn/install-summary.txt
 {
   echo
   echo "$(t final_notice)"

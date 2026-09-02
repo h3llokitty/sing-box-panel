@@ -17,7 +17,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 CONFIG_ENV=/etc/sing-box/vpn-panel.env
-if [[ ! -f "$CONFIG_ENV" || ! -x /root/vpn-setup.sh ]]; then
+if [[ ! -f "$CONFIG_ENV" || ! -x /opt/vpn/vpn-setup.sh ]]; then
   echo "$(t warp_panel_missing)" >&2
   exit 1
 fi
@@ -197,7 +197,7 @@ After=warp-svc.service
 UNIT
 systemctl daemon-reload
 
-if ! VPN_CONFIG="$CONFIG_ENV" /root/vpn-setup.sh --rebuild-config; then
+if ! VPN_CONFIG="$CONFIG_ENV" /opt/vpn/vpn-setup.sh --rebuild-config; then
   cp -a "$BACKUP_DIR/vpn-panel.env" "$CONFIG_ENV"
   cp -a "$BACKUP_DIR/config.json" /etc/sing-box/config.json
   if [[ -f "$BACKUP_DIR/warp.conf" ]]; then

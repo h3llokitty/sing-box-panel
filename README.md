@@ -86,9 +86,10 @@ It offers an in-place Git update, a separately confirmed full reinstall, or canc
 During an in-place update, an existing /opt/vpn/server-routing.json can be
 kept (the default) or replaced explicitly with the standard file from Git.
 The same independent choice is offered for the default
-`/opt/vpn/client-routing.json`. Per-device routing files are never overwritten
-by an update.
-Every update creates a rollback backup under /root/vpn-update-backup-*.
+`/opt/vpn/client-routing.json`. The repository-owned
+`/opt/vpn/client-outbounds.json` is the default for new devices. Per-device
+routing and outbound files are never overwritten by an update.
+Every update creates a rollback backup under `/opt/vpn/backups/update-*`.
 
 ## Optional Cloudflare WARP outbound
 
@@ -112,8 +113,14 @@ credentials are local server secrets and are never stored in this repository.
 ## Management after installation
 
 ```bash
-/root/sb-panel
+/opt/vpn/sb-panel
 ```
+
+All panel executables, templates, generated artifacts, build files, summaries,
+and rollback backups live under `/opt/vpn`. The installer does not create a
+launcher or copy program files under `/root`. System service configuration and
+secrets remain in `/etc/sing-box`, with a navigation symlink at
+`/opt/vpn/sing-box`.
 
 Main menu:
 1. create a client
@@ -136,15 +143,29 @@ configuration and editable per-device routing are stored together, for example:
 ```text
 /opt/vpn/clients/kitty/kitty_mac_wg.conf
 /opt/vpn/clients/kitty/kitty_mac_routing.json
+/opt/vpn/clients/kitty/kitty_mac_outbounds.json
 ```
 
 Existing owner directories directly under `/opt/vpn` are migrated
 transactionally on the first manager run. Conflicting files are never
 overwritten.
 
-Run `/root/sb-panel --rebuild-profiles` after editing routing manually, or use
+Run `/opt/vpn/sb-panel --rebuild-profiles` after editing routing manually, or use
 the corresponding service-menu command. Published modern/legacy profile URLs
 do not change.
+
+The per-device `_outbounds.json` is also created once and then preserved. It
+contains editable WireGuard, Hysteria2, VLESS, urltest, and selector templates.
+Client keys, UUIDs, domains, ports, and generated tags are substituted only
+while rendering a profile. VLESS is expanded once per active Reality domain,
+and selector/urltest membership is derived from the device transports and its
+WireGuard profile mode. `extra_outbounds`, `modern_extra_outbounds`, and
+`legacy_extra_outbounds` can hold additional complete outbound objects.
+
+Both variants are rendered to temporary files and published atomically only
+after validation. Modern profiles are checked by the managed runtime;
+legacy profiles are checked by the separately installed official, checksum-
+verified sing-box 1.11.15 binary. That validator never runs as a service.
 
 When a device uses both WireGuard and proxy transports, the manager stores a
 per-device WireGuard profile mode. WireGuard can be omitted from sing-box JSON,
@@ -174,13 +195,15 @@ automatically if you choose to deploy a new server B.
 
 install.sh              — installer for a clean server
 i18n.sh                 — translation table (English/Russian) for install.sh
-vpn-setup.sh            — CLI client manager (run via /root/sb-panel)
+vpn-setup.sh            — CLI client manager (installed as /opt/vpn/vpn-setup.sh)
 config.env.example      — reference list of parameters (install.sh asks for them itself)
 templates/
 template.json           — client profile for sing-box 1.12+ (modern)
 template-legacy.json     — client profile for sing-box 1.11.x (legacy)
 client-routing.json      — default route rule sets and policy rules for new clients
+client-outbounds.json    — default endpoint/outbound templates for new clients
 server-template.json     — technical server configuration template
 server-routing.json      — server route rule sets and policy rules
 install-warp.sh        — optional localized Cloudflare WARP installer
 stats.proto              — protobuf schema for traffic statistics collection
+render-client-profile.py — strict modern/legacy client profile renderer
