@@ -28,10 +28,24 @@ source "$CONFIG_FILE"
 : "${VLESS_SNI:=$VLESS_DEST}"
 : "${VLESS_INTERNAL_PORT_PRIMARY:=20000}"
 : "${AVAILABLE_PROXY_TYPES:=hy2 vless}"
+: "${WARP_ENABLED:=0}"
+: "${WARP_PORT:=40000}"
+: "${WARP_TAG:=WARP}"
+: "${FILES_DOMAIN:=}"
+: "${FILES_INTERNAL_PORT:=9443}"
+: "${SERVICE_WAIT_SECONDS:=30}"
 ### ─────────────────────────────────────────────────────────
 
-AIPS_SPLIT='"0.0.0.0/5","8.0.0.0/7","11.0.0.0/8","12.0.0.0/6","16.0.0.0/4","32.0.0.0/3","64.0.0.0/2","128.0.0.0/3","160.0.0.0/5","168.0.0.0/6","172.0.0.0/12","172.32.0.0/11","172.64.0.0/10","172.128.0.0/9","173.0.0.0/8","174.0.0.0/7","176.0.0.0/4","192.0.0.0/9","192.128.0.0/11","192.160.0.0/13","192.169.0.0/16","192.170.0.0/15","192.172.0.0/14","192.176.0.0/12","192.192.0.0/10","193.0.0.0/8","194.0.0.0/7","196.0.0.0/6","200.0.0.0/5","208.0.0.0/4","::/0"'
-AIPS_FULL='"0.0.0.0/0","::/0"'
+AIPS_SPLIT='"0.0.0.0/5","8.0.0.0/7","11.0.0.0/8","12.0.0.0/6","16.0.0.0/4","32.0.0.0/3","64.0.0.0/2","128.0.0.0/3","160.0.0.0/5","168.0.0.0/6","172.0.0.0/12","172.32.0.0/11","172.64.0.0/10","172.128.0.0/9","173.0.0.0/8","174.0.0.0/7","176.0.0.0/4","192.0.0.0/9","192.128.0.0/11","192.160.0.0/13","192.169.0.0/16","192.170.0.0/15","192.172.0.0/14","192.176.0.0/12","192.192.0.0/10","193.0.0.0/8","194.0.0.0/7","196.0.0.0/6","200.0.0.0/5","208.0.0.0/4"'
+AIPS_FULL='"0.0.0.0/0"'
+
+aips_ipv4_only() {
+  local value="${1:-}"
+  value="${value//,\"::\/0\"/}"
+  value="${value//\"::\/0\",/}"
+  [[ "$value" == '"::/0"' ]] && value=""
+  printf '%s' "$value"
+}
 
 DIR=/etc/sing-box
 REALITY_DOMAINS_FILE=$DIR/reality-domains.env
@@ -42,10 +56,29 @@ HYD=$DIR/clients/hy2
 CONFIG=$DIR/config.json
 TEMPLATE=/opt/vpn/template.json
 SERVER_TEMPLATE=/opt/vpn/server-template.json
+SERVER_ROUTING=/opt/vpn/server-routing.json
+CLIENT_ROUTING_TEMPLATE=/opt/vpn/client-routing.json
+CLIENT_OUTBOUNDS_TEMPLATE=/opt/vpn/client-outbounds.json
 TEMPLATE_LEGACY=/opt/vpn/template-legacy.json
+CLIENT_PROFILE_RENDERER=/opt/vpn/render-client-profile.py
+LEGACY_SING_BOX=/opt/vpn/bin/sing-box-legacy
 PROFILES=/opt/vpn/profiles
-CONFDIR=/root/clients
-mkdir -p "$CLI" "$PROFILES" "$CONFDIR"
+CERTBOT_CERT_PATH="/etc/letsencrypt/live/${A_DOMAIN}/fullchain.pem"
+CERTBOT_KEY_PATH="/etc/letsencrypt/live/${A_DOMAIN}/privkey.pem"
+CERTMAGIC_DIR="/var/lib/sing-box/.local/share/certmagic/certificates/acme-v02.api.letsencrypt.org-directory/${A_DOMAIN}"
+CERTMAGIC_CERT_PATH="${CERTMAGIC_DIR}/${A_DOMAIN}.crt"
+CERTMAGIC_KEY_PATH="${CERTMAGIC_DIR}/${A_DOMAIN}.key"
+if [[ -s "$CERTBOT_CERT_PATH" && -s "$CERTBOT_KEY_PATH" ]]; then
+  A_CERT_PATH="$CERTBOT_CERT_PATH"
+  A_KEY_PATH="$CERTBOT_KEY_PATH"
+else
+  A_CERT_PATH="$CERTMAGIC_CERT_PATH"
+  A_KEY_PATH="$CERTMAGIC_KEY_PATH"
+fi
+LEGACY_CLIENT_FILES_ROOT=/opt/vpn
+CLIENT_FILES_ROOT=/opt/vpn/clients
+mkdir -p "$CLI" "$PROFILES"
+install -d -m 0700 "$CLIENT_FILES_ROOT"
 TRAFFIC_DIR=/opt/vpn/traffic
 TRAFFIC_DAILY="$TRAFFIC_DIR/daily"
 TRAFFIC_STATE="$TRAFFIC_DIR/state.env"
@@ -81,6 +114,10 @@ write_nginx_stream() {
     map_entries="${map_entries}    ${vd_dom} 127.0.0.1:${vd_port};\n"
   done
 
+  if [[ -n "$FILES_DOMAIN" ]]; then
+    map_entries="    ${FILES_DOMAIN} 127.0.0.1:${FILES_INTERNAL_PORT};\n${map_entries}"
+  fi
+
   mkdir -p /etc/nginx/stream.d
   {
     echo "map \$ssl_preread_server_name \$vless_backend {"
@@ -89,8 +126,7 @@ write_nginx_stream() {
     echo "}"
     echo
     echo "server {"
-    echo "    listen ${VLESS_PORT};"
-    echo "    listen [::]:${VLESS_PORT};"
+    echo "    listen ${A_IP}:${VLESS_PORT};"
     echo "    ssl_preread on;"
     echo "    proxy_pass \$vless_backend;"
     echo "}"
@@ -102,9 +138,13 @@ write_nginx_stream() {
     fi
   fi
 
-  local cert_path="/var/lib/sing-box/.local/share/certmagic/certificates/acme-v02.api.letsencrypt.org-directory/${A_DOMAIN}/${A_DOMAIN}.crt"
-  if [[ -f "$cert_path" ]]; then
-    nginx -t && systemctl restart nginx
+  if [[ -f "$A_CERT_PATH" ]]; then
+    nginx -t
+    if systemctl is-active --quiet nginx; then
+      systemctl reload nginx
+    else
+      systemctl start nginx
+    fi
   else
     printf -- "$(t cert_not_ready_yet)\n" "${A_DOMAIN}"
   fi
@@ -130,6 +170,144 @@ next_wg_ip() {
   for n in $(seq 2 254); do echo "$used" | grep -qx "$n" || { echo "$n"; return; }; done
   echo "ERR"; return 1
 }
+
+client_owner_dir() {
+  printf '%s/%s' "$CLIENT_FILES_ROOT" "$1"
+}
+
+client_wg_path() {
+  printf '%s/%s_wg.conf' "$(client_owner_dir "$1")" "$2"
+}
+
+client_routing_path() {
+  printf '%s/%s_routing.json' "$(client_owner_dir "$1")" "$2"
+}
+
+client_outbounds_path() {
+  printf '%s/%s_outbounds.json' "$(client_owner_dir "$1")" "$2"
+}
+
+migrate_client_files_layout() {
+  local env_file owner old_dir new_dir entry target migrated=0
+  local -A owners=()
+
+  install -d -m 0700 "$CLIENT_FILES_ROOT"
+  for env_file in "$CLI"/*.env; do
+    [[ -e "$env_file" ]] || continue
+    owner=$(sed -n 's/^NAME="\([A-Za-z0-9_]*\)"$/\1/p' "$env_file" | head -1)
+    if [[ -z "$owner" ]]; then
+      printf -- "$(t client_layout_invalid_owner)\n" "$env_file" >&2
+      return 1
+    fi
+    owners["$owner"]=1
+  done
+
+  # Preflight every collision before moving the first file.
+  for owner in "${!owners[@]}"; do
+    old_dir="$LEGACY_CLIENT_FILES_ROOT/$owner"
+    new_dir="$CLIENT_FILES_ROOT/$owner"
+    [[ -d "$old_dir" && -d "$new_dir" ]] || continue
+    while IFS= read -r -d '' entry; do
+      target="$new_dir/$(basename "$entry")"
+      [[ ! -e "$target" && ! -L "$target" ]] && continue
+      if [[ -f "$entry" && -f "$target" ]] && cmp -s "$entry" "$target"; then
+        continue
+      fi
+      printf -- "$(t client_layout_conflict)\n" "$entry" "$target" >&2
+      return 1
+    done < <(find "$old_dir" -mindepth 1 -maxdepth 1 -print0)
+  done
+
+  for owner in "${!owners[@]}"; do
+    old_dir="$LEGACY_CLIENT_FILES_ROOT/$owner"
+    new_dir="$CLIENT_FILES_ROOT/$owner"
+    [[ -d "$old_dir" ]] || continue
+    if [[ ! -e "$new_dir" ]]; then
+      mv "$old_dir" "$new_dir"
+    else
+      install -d -m 0700 "$new_dir"
+      while IFS= read -r -d '' entry; do
+        target="$new_dir/$(basename "$entry")"
+        if [[ -f "$entry" && -f "$target" ]] && cmp -s "$entry" "$target"; then
+          rm -f "$entry"
+        else
+          mv "$entry" "$target"
+        fi
+      done < <(find "$old_dir" -mindepth 1 -maxdepth 1 -print0)
+      rmdir "$old_dir"
+    fi
+    chmod 0700 "$new_dir"
+    migrated=$((migrated + 1))
+  done
+
+  if (( migrated > 0 )); then
+    printf -- "$(t client_layout_migrated)\n" "$migrated" "$CLIENT_FILES_ROOT"
+  fi
+}
+
+ensure_client_routing() {
+  local owner="$1" key="$2" owner_dir routing_file legacy_routing
+  owner_dir=$(client_owner_dir "$owner")
+  routing_file=$(client_routing_path "$owner" "$key")
+  legacy_routing="/root/clients/${key}_routing.json"
+  install -d -m 0700 "$owner_dir"
+  if [[ ! -f "$routing_file" ]]; then
+    if [[ -f "$legacy_routing" ]]; then
+      install -m 0600 "$legacy_routing" "$routing_file"
+      cmp -s "$legacy_routing" "$routing_file" && rm -f "$legacy_routing"
+    else
+      install -m 0600 "$CLIENT_ROUTING_TEMPLATE" "$routing_file"
+    fi
+  fi
+  printf '%s' "$routing_file"
+}
+
+ensure_client_outbounds() {
+  local owner="$1" key="$2" owner_dir outbounds_file legacy_outbounds
+  owner_dir=$(client_owner_dir "$owner")
+  outbounds_file=$(client_outbounds_path "$owner" "$key")
+  legacy_outbounds="/root/clients/${key}_outbounds.json"
+  install -d -m 0700 "$owner_dir"
+  if [[ ! -f "$outbounds_file" ]]; then
+    if [[ -f "$legacy_outbounds" ]]; then
+      install -m 0600 "$legacy_outbounds" "$outbounds_file"
+      cmp -s "$legacy_outbounds" "$outbounds_file" && rm -f "$legacy_outbounds"
+    else
+      install -m 0600 "$CLIENT_OUTBOUNDS_TEMPLATE" "$outbounds_file"
+    fi
+  fi
+  printf '%s' "$outbounds_file"
+}
+
+remove_client_artifacts() {
+  local owner="$1" key="$2" owner_dir
+  owner_dir=$(client_owner_dir "$owner")
+  rm -f "$(client_wg_path "$owner" "$key")" "$(client_routing_path "$owner" "$key")" \
+    "$(client_outbounds_path "$owner" "$key")"
+  rm -f "/root/clients/${key}.conf" "/root/clients/${key}_wg.conf" "/root/clients/${key}_routing.json" \
+    "/root/clients/${key}_outbounds.json"
+  rmdir "$owner_dir" 2>/dev/null || true
+}
+
+move_client_artifacts() {
+  local old_owner="$1" old_key="$2" new_owner="$3" new_key="$4"
+  local old_dir new_dir old_file new_file
+  old_dir=$(client_owner_dir "$old_owner")
+  new_dir=$(client_owner_dir "$new_owner")
+  install -d -m 0700 "$new_dir"
+  old_file=$(client_wg_path "$old_owner" "$old_key")
+  new_file=$(client_wg_path "$new_owner" "$new_key")
+  [[ -f "$old_file" ]] && mv -f "$old_file" "$new_file"
+  old_file=$(client_routing_path "$old_owner" "$old_key")
+  new_file=$(client_routing_path "$new_owner" "$new_key")
+  [[ -f "$old_file" ]] && mv -f "$old_file" "$new_file"
+  old_file=$(client_outbounds_path "$old_owner" "$old_key")
+  new_file=$(client_outbounds_path "$new_owner" "$new_key")
+  [[ -f "$old_file" ]] && mv -f "$old_file" "$new_file"
+  rmdir "$old_dir" 2>/dev/null || true
+}
+
+migrate_client_files_layout
 
 rebuild_config() {
   source "$BASE"
@@ -172,11 +350,19 @@ rebuild_config() {
           \"short_id\": [\"${REALITY_SID}\"] } } }"
     done
   fi
-  local b_hy2_outbound="" b_vless_outbound="" b_opts="\"direct\""
+  local warp_outbound="" b_hy2_outbound="" b_vless_outbound="" b_opts="\"direct\""
+  if [[ "$WARP_ENABLED" == "1" ]]; then
+    [[ "$WARP_TAG" =~ ^[A-Za-z0-9_-]+$ ]] || {
+      echo "$(t invalid_warp_tag)" >&2
+      return 1
+    }
+    warp_outbound=",
+    { \"type\": \"socks\", \"tag\": \"${WARP_TAG}\", \"server\": \"127.0.0.1\",
+      \"server_port\": ${WARP_PORT}, \"version\": \"5\" }"
+  fi
   local v2b_outbounds=""
   local transport_file=/etc/sing-box/transport.env
   local TO_B_DEFAULT=""
-  [[ -f "$transport_file" ]] && source "$transport_file"
   if [[ -n "${B_PASS:-}" ]]; then
     b_hy2_outbound=",
     { \"type\": \"hysteria2\", \"tag\": \"hy2-out\", \"server\": \"${B_DOMAIN}\", \"server_port\": ${B_PORT},
@@ -198,6 +384,8 @@ rebuild_config() {
     [[ -z "$TO_B_DEFAULT" ]] && TO_B_DEFAULT="vless-out-b"
   fi
   [[ -z "$TO_B_DEFAULT" ]] && TO_B_DEFAULT="direct"
+  # The persisted user choice must override the automatically selected default.
+  [[ -f "$transport_file" ]] && source "$transport_file"
   case ",${b_opts}," in
     *"\"${TO_B_DEFAULT}\""*) : ;;
     *) TO_B_DEFAULT="${b_opts##*,}"; TO_B_DEFAULT="${TO_B_DEFAULT//\"/}" ;;
@@ -207,24 +395,44 @@ rebuild_config() {
       \"outbounds\": [ ${b_opts} ],
       \"default\": \"${TO_B_DEFAULT}\" }"
   local b_final="to-b"
+  local direct_route_file=/etc/sing-box/direct-route.env
+  local DIRECT_RULES_OUTBOUND="direct"
+  [[ -f "$direct_route_file" ]] && source "$direct_route_file"
+  if [[ "$WARP_ENABLED" != "1" || "$DIRECT_RULES_OUTBOUND" != "$WARP_TAG" ]]; then
+    DIRECT_RULES_OUTBOUND="direct"
+  fi
 
-  python3 - "$SERVER_TEMPLATE" "$CONFIG" \
-    "${HY2_PORT}" "${users}" "${HY2_OBFS}" "${A_DOMAIN}" "${ACME_EMAIL}" "${vless_inbound}" \
+  local hy2_tls config_new="${CONFIG}.new"
+  if [[ -s "$A_CERT_PATH" && -s "$A_KEY_PATH" ]]; then
+    hy2_tls=$(jq -nc \
+      --arg domain "$A_DOMAIN" --arg cert "$A_CERT_PATH" --arg key "$A_KEY_PATH" \
+      '{enabled:true,server_name:$domain,alpn:["h3"],certificate_path:$cert,key_path:$key}')
+  else
+    # Bootstrap only: sing-box obtains the first certificate while nginx is stopped.
+    # Every later rebuild uses the issued files directly, so an ACME renewal failure
+    # cannot take the VPN service down.
+    hy2_tls=$(jq -nc \
+      --arg domain "$A_DOMAIN" --arg email "$ACME_EMAIL" \
+      '{enabled:true,server_name:$domain,alpn:["h3"],acme:{domain:[$domain],email:$email}}')
+  fi
+  python3 - "$SERVER_TEMPLATE" "$SERVER_ROUTING" "$config_new" \
+    "${HY2_PORT}" "${users}" "${HY2_OBFS}" "${hy2_tls}" "${vless_inbound}" \
     "${WG_NET}" "${A_PRIV}" "${WG_PORT}" "${peers}" "${B_DOMAIN}" "${B_PORT}" "${B_PASS}" \
-    "${b_vless_outbound}" "${b_selector}" "${b_final}" "${v2users}" "${b_hy2_outbound}" "${v2b_outbounds}" <<'PYEOF'
+    "${b_vless_outbound}" "${b_selector}" "${b_final}" "${v2users}" "${b_hy2_outbound}" "${v2b_outbounds}" \
+    "${warp_outbound}" "${WARP_ENABLED}" "${WARP_TAG}" "${DIRECT_RULES_OUTBOUND}" <<'PYEOF'
 import sys, json
-tmpl, out = sys.argv[1], sys.argv[2]
-(hy2_port, users, hy2_obfs, a_domain, acme_email, vless_inbound,
+tmpl, routing, out = sys.argv[1:4]
+(hy2_port, users, hy2_obfs, hy2_tls, vless_inbound,
  wg_net, a_priv, wg_port, peers, b_domain, b_port, b_pass,
  b_vless_outbound, b_selector, b_final, v2users,
- b_hy2_outbound, v2b_outbounds) = sys.argv[3:22]
+ b_hy2_outbound, v2b_outbounds, warp_outbound,
+ warp_enabled, warp_tag, direct_rules_outbound) = sys.argv[4:27]
 s = open(tmpl).read()
 repl = {
     "__HY2_PORT__": hy2_port,
     "__USERS__": users,
     "__HY2_OBFS__": hy2_obfs,
-    "__A_DOMAIN__": a_domain,
-    "__ACME_EMAIL__": acme_email,
+    "__HY2_TLS__": hy2_tls,
     "__VLESS_INBOUND__": vless_inbound,
     "__WG_NET__": wg_net,
     "__A_PRIV__": a_priv,
@@ -239,16 +447,57 @@ repl = {
     "__V2USERS__": v2users,
     "__B_HY2_OUTBOUND__": b_hy2_outbound,
     "__B_STATS_OUTBOUNDS__": v2b_outbounds,
+    "__WARP_OUTBOUND__": warp_outbound,
 }
 for k, v in repl.items():
     s = s.replace(k, v)
-json.loads(s)
-open(out, "w").write(s)
+config = json.loads(s)
+with open(routing) as routing_file:
+    policy = json.load(routing_file)
+rule_sets = policy.get("rule_set", [])
+rules = policy.get("rules", [])
+if not isinstance(rule_sets, list) or not isinstance(rules, list):
+    raise ValueError("server-routing.json: rule_set and rules must be arrays")
+for rule in rules:
+    if rule.get("outbound") == "DIRECT_RULES":
+        rule["outbound"] = direct_rules_outbound
+config["route"]["rule_set"] = rule_sets
+config["route"]["rules"].extend(rules)
+with open(out, "w") as output_file:
+    json.dump(config, output_file, indent=2)
+    output_file.write("\n")
 PYEOF
-  sing-box check -c "$CONFIG" && echo "config OK"
+  if ! sing-box check -c "$config_new"; then
+    rm -f "$config_new"
+    echo "$(t server_config_check_failed)" >&2
+    return 1
+  fi
+  mv -f "$config_new" "$CONFIG"
+  echo "$(t config_ok)"
   systemctl enable --now sing-box >/dev/null 2>&1 || true
-  systemctl restart sing-box
+  systemctl restart --no-block sing-box
   echo "$(t singbox_restarted)"
+
+  local service_ready=0 service_pid
+  for _ in $(seq 1 "$SERVICE_WAIT_SECONDS"); do
+    if systemctl is-active --quiet sing-box && \
+       ss -lntH 'sport = :8080' 2>/dev/null | grep -q '127.0.0.1:8080'; then
+      service_pid=$(systemctl show sing-box -p MainPID --value)
+      sleep 2
+      if systemctl is-active --quiet sing-box && \
+         [[ "$(systemctl show sing-box -p MainPID --value)" == "$service_pid" ]] && \
+         ss -lntH 'sport = :8080' 2>/dev/null | grep -q '127.0.0.1:8080'; then
+        service_ready=1
+        break
+      fi
+    fi
+    sleep 1
+  done
+  if [[ "$service_ready" != "1" ]]; then
+    echo "$(t singbox_start_failed)" >&2
+    journalctl -u sing-box -n 40 --no-pager >&2 || true
+    return 1
+  fi
 
   # пересобрать все выданные клиентские профили (актуализирует теги/логику у всех разом)
   local rf rkey
@@ -262,241 +511,141 @@ PYEOF
   write_nginx_stream
 }
 
-wg_endpoint_json() {
-  [[ -z "${AIPS:-}" ]] && AIPS="$AIPS_FULL"
-  cat <<WG
-{ "type": "wireguard", "tag": "${A_DOMAIN}_${PROFILE}_wg", "system": false, "mtu": 1280,
-  "address": ["${WG_NET}.${IP}/24"], "private_key": "${WG_PRIV}",
-  "peers": [ { "address": "${A_IP}", "port": ${WG_PORT}, "public_key": "${A_PUB}",
-    "pre_shared_key": "${WG_PSK}", "allowed_ips": [${AIPS}], "persistent_keepalive_interval": 25 } ] }
-WG
-}
-hy2_outbound_json() {
-  cat <<HY
-{ "type": "hysteria2", "tag": "${A_DOMAIN}_${PROFILE}_hy2", "server": "${A_DOMAIN}", "server_port": ${HY2_PORT},
-  "password": "${PASS}", "obfs": { "type": "salamander", "password": "${HY2_OBFS}" },
-  "tls": { "enabled": true, "server_name": "${A_DOMAIN}", "alpn": ["h3"] } }
-HY
-}
-
-# генерирует ОДИН блок для конкретного домена: $1=домен
-vless_outbound_json_for_domain() {
-  local dom="$1"
-  cat <<VL
-{ "type": "vless", "tag": "${dom}_${PROFILE}_vless", "server": "${A_DOMAIN}", "server_port": ${VLESS_PORT},
-  "uuid": "${VLESS_UUID}", "flow": "xtls-rprx-vision",
-  "tls": { "enabled": true, "server_name": "${dom}",
-    "utls": { "enabled": true, "fingerprint": "chrome" },
-    "reality": { "enabled": true, "public_key": "${REALITY_PUB}", "short_id": "${REALITY_SID}" } } }
-VL
-}
-
-# печатает блоки для ВСЕХ активных доменов, через запятую с переносом (для вставки в массив outbounds)
-vless_outbound_json() {
-  local vd_line vd_dom first=1
-  local -a vd_all
-  mapfile -t vd_all < <(list_vless_domains)
-  for vd_line in "${vd_all[@]}"; do
-    vd_dom="${vd_line%%:*}"
-    [[ $first -eq 0 ]] && printf ',\n'
-    vless_outbound_json_for_domain "$vd_dom"
-    first=0
-  done
-}
-
-# список тегов VLESS (по одному на домен) — нужен для selector/urltest
-vless_tags() {
-  local vd_line vd_dom
-  local -a vd_all
-  mapfile -t vd_all < <(list_vless_domains)
-  for vd_line in "${vd_all[@]}"; do
-    vd_dom="${vd_line%%:*}"
-    echo "${vd_dom}_${PROFILE}_vless"
-  done
-}
-
-outbound_json_for() {
-  case "$1" in
-    hy2) hy2_outbound_json ;;
-    vless) vless_outbound_json ;;
-    *) printf -- "$(t unknown_proxy_type)\n" "$1" >&2; return 1 ;;
+wg_profile_mode() {
+  case "${WG_PROFILE_MODE:-urltest}" in
+    disabled|selector|urltest) printf '%s' "${WG_PROFILE_MODE:-urltest}" ;;
+    *) printf 'urltest' ;;
   esac
 }
 
-client_proxy_types() {
-  local types=""
-  if [[ -n "${PASS:-}" ]]; then types+="hy2 "; fi
-  if [[ -n "${VLESS_UUID:-}" ]]; then types+="vless "; fi
-  echo "$types"
+wg_profile_enabled() {
+  [[ -n "${WG_PUB:-}" && "$(wg_profile_mode)" != "disabled" ]]
 }
 
+wg_urltest_enabled() {
+  [[ -n "${WG_PUB:-}" && "$(wg_profile_mode)" == "urltest" ]]
+}
 
-# по типу прокси-протокола строит полный тег с доменом (WG/Hy2 -> A_DOMAIN, VLESS -> VLESS_DEST)
-proxy_tag_for() {  # $1 = wg | hy2 | vless
-  case "$1" in
-    wg)    echo "${A_DOMAIN}_${PROFILE}_wg" ;;
-    hy2)   echo "${A_DOMAIN}_${PROFILE}_hy2" ;;
-    vless) echo "${VLESS_DEST}_${PROFILE}_vless" ;;
-    *) echo "${PROFILE}_${1}" ;;
+prompt_wg_profile_mode() {
+  local current="${1:-urltest}" default_choice choice
+  case "$current" in
+    disabled) default_choice=1 ;;
+    selector) default_choice=2 ;;
+    *) current=urltest; default_choice=3 ;;
   esac
-}
-
-urltest_json() {
-  local opts="" first=1 tag count=0
-  if [[ -n "${WG_PUB:-}" ]]; then
-    tag=$(proxy_tag_for wg)
-    opts+="\"${tag}\""
-    first=0
-    count=$((count+1))
-  fi
-  while IFS= read -r tag; do
-    [[ -z "$tag" ]] && continue
-    [[ $first -eq 0 ]] && opts+=","
-    opts+="\"${tag}\""
-    first=0
-    count=$((count+1))
-  done < <(all_proxy_tags)
-  [[ $count -lt 2 ]] && return 1
-  cat <<UT
-{ "type": "urltest", "tag": "auto",
-  "outbounds": [ ${opts} ],
-  "url": "https://www.gstatic.com/generate_204",
-  "interval": "5m",
-  "tolerance": 200 }
-UT
-}
-
-# все теги proxy-протоколов клиента: hy2 -> 1 тег, vless -> N тегов (по числу доменов)
-all_proxy_tags() {
-  local pt tag
-  for pt in $(client_proxy_types); do
-    if [[ "$pt" == "vless" ]]; then
-      vless_tags
-    else
-      echo "${A_DOMAIN}_${PROFILE}_${pt}"
-    fi
-  done
-}
-
-selector_json() {
-  local opts="" first=1 def_tag="" tag has_proxy=0
-  if [[ -n "${WG_PUB:-}" ]]; then
-    tag=$(proxy_tag_for wg)
-    opts+="\"${tag}\""
-    first=0
-    def_tag="${tag}"
-  fi
-  while IFS= read -r tag; do
-    [[ -z "$tag" ]] && continue
-    has_proxy=1
-    [[ $first -eq 0 ]] && opts+=","
-    opts+="\"${tag}\""
-    first=0
-    def_tag="${tag}"
-  done < <(all_proxy_tags)
-  if [[ $has_proxy -eq 1 ]]; then
-    [[ $first -eq 0 ]] && opts+=","
-    opts+="\"auto\""
-    first=0
-    def_tag="auto"
-  fi
-  cat <<SEL
-{ "type": "selector", "tag": "Select",
-  "outbounds": [ ${opts} ],
-  "default": "${def_tag}" }
-SEL
+  echo "$(t wg_profile_mode_header)"
+  echo "$(t wg_profile_mode_disabled)"
+  echo "$(t wg_profile_mode_selector)"
+  echo "$(t wg_profile_mode_urltest)"
+  read -rp "$(printf -- "$(t prompt_choice_13_default)" "$default_choice")" choice
+  case "${choice:-$default_choice}" in
+    1) WG_PROFILE_MODE_CHOICE=disabled ;;
+    2) WG_PROFILE_MODE_CHOICE=selector ;;
+    3) WG_PROFILE_MODE_CHOICE=urltest ;;
+    *) echo "$(t invalid)"; return 1 ;;
+  esac
 }
 
 gen_wg_conf() {
+  AIPS=$(aips_ipv4_only "${AIPS:-}")
   [[ -z "${AIPS:-}" ]] && AIPS="$AIPS_FULL"
   local caips; caips=$(echo "$AIPS" | tr -d '"')
-  local path="$CONFDIR/${KEY}.conf"
+  local owner_dir path legacy_path
+  owner_dir=$(client_owner_dir "$NAME")
+  install -d -m 0700 "$owner_dir"
+  path=$(client_wg_path "$NAME" "$KEY")
+  legacy_path="/root/clients/${KEY}.conf"
   umask 077
   cat > "$path" <<CONF
 [Interface]
 PrivateKey = ${WG_PRIV}
 Address = ${WG_NET}.${IP}/24
-DNS = 1.1.1.1
+DNS = ${WG_NET}.1
 MTU = 1280
 
 [Peer]
 PublicKey = ${A_PUB}
 PresharedKey = ${WG_PSK}
-AllowedIPs = ${caips}
+AllowedIPs = ${WG_NET}.0/24, ${caips}
 Endpoint = ${A_IP}:${WG_PORT}
 PersistentKeepalive = 25
 CONF
+  chmod 0600 "$path"
+  if [[ -f "$legacy_path" ]] && cmp -s "$legacy_path" "$path"; then
+    rm -f "$legacy_path"
+    rmdir /root/clients 2>/dev/null || true
+  fi
   echo "$path"
 }
 
 gen_profile() {
-  local wg="" sel base tail proxies="" pt block first=1
-  if [[ -n "${WG_PUB:-}" ]]; then wg=$(wg_endpoint_json); fi
-  for pt in $(client_proxy_types); do
-    block=$(outbound_json_for "$pt")
-    [[ $first -eq 0 ]] && proxies+=",
-"
-    proxies+="$block"
-    first=0
-  done
-  local ut; ut=$(urltest_json) || ut=""
-  sel=$(selector_json)
-  if [[ -n "$proxies" && -n "$ut" ]]; then
-    tail="${proxies},
-${ut},
-${sel}"
-  elif [[ -n "$proxies" ]]; then
-    tail="${proxies},
-${sel}"
+  local base routing_file outbounds_file modern_new legacy_new modern_ok=0 legacy_ok=0
+  routing_file=$(ensure_client_routing "$NAME" "$KEY")
+  outbounds_file=$(ensure_client_outbounds "$NAME" "$KEY")
+  if [[ -n "${WG_PUB:-}" ]]; then
+    gen_wg_conf >/dev/null
   else
-    tail="${sel}"
+    rm -f "$(client_wg_path "$NAME" "$KEY")"
   fi
   base="$PROFILES/${KEY}_${TOKEN}"
 
-  python3 - "$TEMPLATE" "${base}-modern.json" <<PYEOF
-import sys, json
-tmpl, out = sys.argv[1], sys.argv[2]
-wg = """$wg"""; tail = """$tail"""
-s = open(tmpl).read()
-s = s.replace("__WG_ENDPOINT__", wg.strip())
-s = s.replace("__OUTBOUND_TAIL__", tail.strip())
-json.loads(s)
-open(out,"w").write(s)
-PYEOF
-  local modern_ok=1
-  if [[ $? -ne 0 ]]; then echo "$(t json_error_modern)"; rm -f "${base}-modern.json"; modern_ok=0
-  elif ! sing-box check -c "${base}-modern.json" >/dev/null 2>&1; then
+  AIPS=$(aips_ipv4_only "${AIPS:-}")
+  [[ -z "${AIPS:-}" ]] && AIPS="$AIPS_FULL"
+  export SBP_A_DOMAIN="$A_DOMAIN" SBP_A_IP="$A_IP" SBP_CACHE_ID="${KEY}_${TOKEN}"
+  export SBP_VLESS_DEST="$VLESS_DEST" SBP_PROFILE="$PROFILE"
+  export SBP_WG_TAG="${A_DOMAIN}_${PROFILE}_wg" SBP_WG_ADDRESS="${WG_NET}.${IP}/24"
+  export SBP_WG_PRIVATE_KEY="${WG_PRIV:-}" SBP_WG_PUBLIC_KEY="$A_PUB" SBP_WG_PRESHARED_KEY="$WG_PSK"
+  export SBP_WG_PORT="$WG_PORT" SBP_WG_ALLOWED_IPS="[$AIPS]" SBP_WG_PROFILE_MODE="$(wg_profile_mode)"
+  export SBP_HY2_TAG="${A_DOMAIN}_${PROFILE}_hy2" SBP_HY2_PORT="$HY2_PORT"
+  export SBP_HY2_PASSWORD="${PASS:-}" SBP_HY2_OBFS="$HY2_OBFS"
+  export SBP_VLESS_PORT="$VLESS_PORT" SBP_VLESS_UUID="${VLESS_UUID:-}"
+  export SBP_REALITY_PUBLIC_KEY="$REALITY_PUB" SBP_REALITY_SHORT_ID="$REALITY_SID"
+  export SBP_WG_ENABLED=0 SBP_HY2_ENABLED=0 SBP_VLESS_ENABLED=0
+  if wg_profile_enabled; then SBP_WG_ENABLED=1; fi
+  if [[ -n "${PASS:-}" ]]; then SBP_HY2_ENABLED=1; fi
+  if [[ -n "${VLESS_UUID:-}" ]]; then SBP_VLESS_ENABLED=1; fi
+  export SBP_WG_ENABLED SBP_HY2_ENABLED SBP_VLESS_ENABLED
+  SBP_VLESS_DOMAINS=$(list_vless_domains | cut -d: -f1)
+  export SBP_VLESS_DOMAINS
+
+  modern_new="${base}-modern.json.new"
+  if ! python3 "$CLIENT_PROFILE_RENDERER" --variant modern --template "$TEMPLATE" \
+      --routing "$routing_file" --outbounds "$outbounds_file" --output "$modern_new"; then
+    echo "$(t json_error_modern)"
+    rm -f "$modern_new"
+  elif ! sing-box check -c "$modern_new" >/dev/null 2>&1; then
     echo "$(t modern_check_failed)"
-    sing-box check -c "${base}-modern.json" 2>&1 | grep -v WARN | head -4
-    rm -f "${base}-modern.json"; modern_ok=0
+    sing-box check -c "$modern_new" 2>&1 | grep -v WARN | head -4 || true
+    rm -f "$modern_new"
+  else
+    mv -f "$modern_new" "${base}-modern.json"
+    modern_ok=1
   fi
 
-  python3 - "$TEMPLATE_LEGACY" "${base}-legacy.json" <<PYEOF
-import sys, json
-tmpl, out = sys.argv[1], sys.argv[2]
-wg = """$wg"""; tail = """$tail"""
-s = open(tmpl).read()
-s = s.replace("__WG_ENDPOINT__", wg.strip())
-s = s.replace("__OUTBOUND_TAIL__", tail.strip())
-json.loads(s)
-open(out,"w").write(s)
-PYEOF
-  local legacy_ok=1
-  if [[ $? -ne 0 ]]; then echo "$(t json_error_legacy)"; rm -f "${base}-legacy.json"; legacy_ok=0; fi
+  legacy_new="${base}-legacy.json.new"
+  if ! python3 "$CLIENT_PROFILE_RENDERER" --variant legacy --template "$TEMPLATE_LEGACY" \
+      --routing "$routing_file" --outbounds "$outbounds_file" --output "$legacy_new"; then
+    echo "$(t json_error_legacy)"
+    rm -f "$legacy_new"
+  elif [[ ! -x "$LEGACY_SING_BOX" ]]; then
+    echo "$(t legacy_validator_missing)"
+    rm -f "$legacy_new"
+  elif ! "$LEGACY_SING_BOX" check -c "$legacy_new" >/dev/null 2>&1; then
+    echo "$(t legacy_check_failed)"
+    "$LEGACY_SING_BOX" check -c "$legacy_new" 2>&1 | grep -v WARN | head -4 || true
+    rm -f "$legacy_new"
+  else
+    mv -f "$legacy_new" "${base}-legacy.json"
+    legacy_ok=1
+  fi
 
   if [[ $modern_ok -eq 0 && $legacy_ok -eq 0 ]]; then
-    echo "$(t both_variants_failed)"; return 1
+    echo "$(t both_variants_failed)"
+    return 1
   fi
-
-  if command -v jq >/dev/null 2>&1; then
-    for f in "${base}-modern.json" "${base}-legacy.json"; do
-      [[ -f "$f" ]] && { jq . "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"; }
-    done
-  fi
-  chmod 644 "${base}-modern.json" "${base}-legacy.json" 2>/dev/null
-
+  chmod 0644 "${base}-modern.json" "${base}-legacy.json" 2>/dev/null || true
   printf -- "$(t modern_result)\n" "$([[ $modern_ok -eq 1 ]] && t ok_word || t failed_see_above)"
-  printf -- "$(t legacy_result)\n" "$([[ $legacy_ok -eq 1 ]] && t ok_word || t no_word)"
+  printf -- "$(t legacy_result)\n" "$([[ $legacy_ok -eq 1 ]] && t ok_word || t failed_see_above)"
 
   local url enc
   url="https://${PROFILE_HOST}:${PROFILE_PORT}/${KEY}_${TOKEN}.json"
@@ -510,15 +659,37 @@ PYEOF
 
 gen_profile_quiet() {  # $1 = ключ клиента, только пересобрать файлы, без вывода блоков
   source "$BASE"
-  NAME=""; PROFILE=""; WG_PRIV=""; WG_PUB=""; IP=""; PASS=""; VLESS_UUID=""; AIPS=""; TOKEN=""
+  NAME=""; PROFILE=""; WG_PRIV=""; WG_PUB=""; IP=""; PASS=""; VLESS_UUID=""; AIPS=""; TOKEN=""; WG_PROFILE_MODE=""
   source "$CLI/$1.env"
   local KEY="$1"
   gen_profile
 }
 
+rebuild_all_profiles() {
+  ensure_base
+  local f key total=0 ok=0 failed=0 output
+  echo "$(t profiles_rebuild_header)"
+  for f in "$CLI"/*.env; do
+    [[ -e "$f" ]] || continue
+    key=$(basename "$f" .env)
+    total=$((total+1))
+    if output=$(gen_profile_quiet "$key" 2>&1); then
+      printf -- "$(t profile_rebuild_ok)\n" "$key"
+      ok=$((ok+1))
+    else
+      printf -- "$(t profile_rebuild_failed)\n" "$key"
+      [[ -n "$output" ]] && printf '%s\n' "$output" | tail -4
+      failed=$((failed+1))
+    fi
+  done
+  printf -- "$(t profiles_rebuild_summary)\n" "$ok" "$total"
+  echo "$(t profiles_rebuild_no_restart)"
+  [[ $failed -eq 0 ]]
+}
+
 emit_client() {
   source "$BASE"
-  NAME=""; PROFILE=""; WG_PRIV=""; WG_PUB=""; IP=""; PASS=""; VLESS_UUID=""; AIPS=""; TOKEN=""
+  NAME=""; PROFILE=""; WG_PRIV=""; WG_PUB=""; IP=""; PASS=""; VLESS_UUID=""; AIPS=""; TOKEN=""; WG_PROFILE_MODE=""
   source "$CLI/$1.env"
   local KEY="$1"
   printf -- "$(t client_header)\n" "${NAME}" "${PROFILE}"
@@ -526,40 +697,25 @@ emit_client() {
     echo "IP: ${WG_NET}.${IP}"
     local cf; cf=$(gen_wg_conf)
     printf -- "$(t wg_conf_label)\n" "$cf"
-    echo
-    echo "$(t block_wg_endpoint)"
-    wg_endpoint_json | (jq . 2>/dev/null || cat)
+    printf -- "$(t wg_profile_mode_label)\n" "$(t "wg_profile_mode_$(wg_profile_mode)_short")"
     echo
   fi
-  local pt
-  for pt in $(client_proxy_types); do
-    if [[ "$pt" == "vless" ]]; then
-      local vd_line vd_dom
-      local -a vd_all
-      mapfile -t vd_all < <(list_vless_domains)
-      for vd_line in "${vd_all[@]}"; do
-        vd_dom="${vd_line%%:*}"
-        printf -- "$(t block_vless_outbound_domain)\n" "${vd_dom}"
-        vless_outbound_json_for_domain "$vd_dom" | (jq . 2>/dev/null || cat)
-        echo
-      done
-    else
-      printf -- "$(t block_outbound_generic)\n" "${pt}"
-      outbound_json_for "$pt" | (jq . 2>/dev/null || cat)
-      echo
-    fi
-  done
-  local ut_preview; ut_preview=$(urltest_json 2>/dev/null) || ut_preview=""
-  if [[ -n "$ut_preview" ]]; then
-    echo "$(t block_urltest)"
-    echo "$ut_preview" | (jq . 2>/dev/null || cat)
-    echo
-  fi
-  echo "$(t block_selector)"
-  selector_json | (jq . 2>/dev/null || cat)
+  local routing_file
+  routing_file=$(ensure_client_routing "$NAME" "$KEY")
+  printf -- "$(t client_routing_label)\n" "$routing_file"
+  local outbounds_file
+  outbounds_file=$(ensure_client_outbounds "$NAME" "$KEY")
+  printf -- "$(t client_outbounds_label)\n" "$outbounds_file"
   echo
   echo "$(t profile_url_label)"
-  gen_profile
+  gen_profile || return
+  local rendered="$PROFILES/${KEY}_${TOKEN}-modern.json"
+  [[ -f "$rendered" ]] || rendered="$PROFILES/${KEY}_${TOKEN}-legacy.json"
+  if [[ -f "$rendered" ]]; then
+    echo
+    echo "$(t rendered_client_outbounds)"
+    jq '.endpoints[]?, .outbounds[]? | select(.tag != "direct" and .tag != "bypass" and .tag != "block")' "$rendered"
+  fi
 }
 
 list_names() {
@@ -605,6 +761,12 @@ create_client() {
         2) want_proxy=0 ;;
         3) want_wg=0 ;;
       esac
+      local wg_profile_mode_choice=urltest
+      if [[ $want_wg -eq 1 && $want_proxy -eq 1 ]]; then
+        WG_PROFILE_MODE_CHOICE=""
+        prompt_wg_profile_mode urltest || return
+        wg_profile_mode_choice="$WG_PROFILE_MODE_CHOICE"
+      fi
 
       local aips="" ip="" priv="" pub="" pass="" token m
       token=$(openssl rand -hex 8)
@@ -628,6 +790,7 @@ create_client() {
         if [[ $want_wg -eq 1 ]]; then
           printf 'WG_PRIV="%s"\nWG_PUB="%s"\nIP=%s\n' "$priv" "$pub" "$ip"
           printf "AIPS=%s\n" "'$aips'"
+          printf 'WG_PROFILE_MODE="%s"\n' "$wg_profile_mode_choice"
         fi
         if [[ $want_proxy -eq 1 ]]; then
           printf 'PASS="%s"\nVLESS_UUID="%s"\n' "$pass" "$vless_uuid"
@@ -703,7 +866,9 @@ revoke_client() {
     [[ "${a,,}" == "y" ]] || { echo "$(t cancelled)"; return; }
     for ((j=0; j<${#DEVS[@]}; j++)); do
       local pr="${DEVPROF[$j]}"
-      rm -f "${DEVS[$j]}" "$PROFILES/${owner}_${pr}_"*.json "$CONFDIR/${owner}_${pr}.conf"
+      local owner_key="${owner}_${pr}"
+      rm -f "${DEVS[$j]}" "$PROFILES/${owner_key}_"*.json
+      remove_client_artifacts "$owner" "$owner_key"
     done
     printf -- "$(t owner_deleted)\n" "$owner"
   else
@@ -711,7 +876,8 @@ revoke_client() {
     local key; key=$(basename "${DEVS[$((d-1))]}" .env)
     read -rp "$(printf -- "$(t prompt_delete_device)" "$key")" a
     [[ "${a,,}" == "y" ]] || { echo "$(t cancelled)"; return; }
-    rm -f "$CLI/$key.env" "$PROFILES/${key}_"*.json "$CONFDIR/${key}.conf"
+    rm -f "$CLI/$key.env" "$PROFILES/${key}_"*.json
+    remove_client_artifacts "$owner" "$key"
     printf -- "$(t device_deleted)\n" "$key"
   fi
   rebuild_config
@@ -879,6 +1045,254 @@ traffic_menu() {
   esac
 }
 
+version_stats() {
+  local log_glob="/var/log/nginx/profile_access.log*"
+  local result
+  result=$(python3 - "$PROFILES" $log_glob <<'PYEOF'
+import glob
+import gzip
+import os
+import re
+import sys
+
+profiles = sys.argv[1]
+logs = sys.argv[2:]
+known = set()
+for path in glob.glob(os.path.join(profiles, "*-modern.json")):
+    known.add(os.path.basename(path)[:-len("-modern.json")])
+
+requests = {"modern": 0, "legacy": 0}
+latest = {}
+pattern = re.compile(r"^(\S+).*\| key=([^ |]+) \| variant=(modern|legacy) \|")
+for path in logs:
+    try:
+        opener = gzip.open if path.endswith(".gz") else open
+        with opener(path, "rt", errors="replace") as stream:
+            for line in stream:
+                match = pattern.search(line)
+                if not match:
+                    continue
+                stamp, key, variant = match.groups()
+                if key not in known:
+                    continue
+                requests[variant] += 1
+                if key not in latest or stamp >= latest[key][0]:
+                    latest[key] = (stamp, variant)
+    except (OSError, EOFError):
+        continue
+
+profiles_by_variant = {"modern": 0, "legacy": 0}
+for _, variant in latest.values():
+    profiles_by_variant[variant] += 1
+for variant in ("modern", "legacy"):
+    print(variant, profiles_by_variant[variant], requests[variant])
+PYEOF
+  )
+
+  local variant profiles_count requests_count total=0
+  while read -r variant profiles_count requests_count; do
+    [[ -n "$variant" ]] || continue
+    printf -- "$(t version_stats_row)\n" "$variant" "$profiles_count" "$requests_count"
+    total=$((total + requests_count))
+  done <<< "$result"
+  [[ $total -gt 0 ]] || echo "$(t version_stats_no_data)"
+}
+
+test_b_transport() (
+  local tag="$1" label="$2"
+  local test_dir test_config test_log test_port test_pid=""
+  local result http_code elapsed error_line ready=0 i
+  test_dir=$(mktemp -d)
+  test_config="$test_dir/config.json"
+  test_log="$test_dir/sing-box.log"
+
+  cleanup_b_transport_test() {
+    if [[ -n "$test_pid" ]] && kill -0 "$test_pid" 2>/dev/null; then
+      kill "$test_pid" 2>/dev/null || true
+      wait "$test_pid" 2>/dev/null || true
+    fi
+    rm -rf "$test_dir"
+  }
+  trap cleanup_b_transport_test EXIT
+
+  test_port=$(python3 - <<'PYEOF'
+import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+PYEOF
+  )
+
+  if ! jq --arg tag "$tag" --argjson port "$test_port" '
+      .outbounds[] | select(.tag == $tag) as $out |
+      {
+        log: {level: "debug", timestamp: true},
+        inbounds: [{
+          type: "mixed", tag: "transport-test-in",
+          listen: "127.0.0.1", listen_port: $port
+        }],
+        outbounds: [$out],
+        route: {final: $tag}
+      }
+    ' "$CONFIG" > "$test_config"; then
+    printf -- "$(t transport_test_result_invalid)\n" "$label"
+    return 1
+  fi
+
+  if ! sing-box check -c "$test_config" >/dev/null 2>"$test_log"; then
+    printf -- "$(t transport_test_result_invalid)\n" "$label"
+    return 1
+  fi
+
+  sing-box run -c "$test_config" >"$test_log" 2>&1 &
+  test_pid=$!
+  for i in $(seq 1 30); do
+    if ! kill -0 "$test_pid" 2>/dev/null; then
+      break
+    fi
+    if python3 - "$test_port" <<'PYEOF' >/dev/null 2>&1
+import socket
+import sys
+s = socket.socket()
+s.settimeout(0.2)
+try:
+    s.connect(("127.0.0.1", int(sys.argv[1])))
+finally:
+    s.close()
+PYEOF
+    then
+      ready=1
+      break
+    fi
+    sleep 0.1
+  done
+  if [[ "$ready" != "1" ]]; then
+    error_line=$(grep -E 'ERROR|FATAL' "$test_log" | tail -1 || true)
+    printf -- "$(t transport_test_result_start_failed)\n" "$label" "${error_line:-$(t transport_test_no_details)}"
+    return 1
+  fi
+
+  result=$(curl -4 -sS --socks5-hostname "127.0.0.1:${test_port}" \
+    --connect-timeout 5 --max-time 20 -o /dev/null \
+    -w '%{http_code} %{time_total}' \
+    https://www.gstatic.com/generate_204 2>"$test_dir/curl.log" || true)
+  read -r http_code elapsed <<< "$result"
+  if [[ "$http_code" == "204" ]]; then
+    printf -- "$(t transport_test_result_ok)\n" "$label" "$elapsed"
+    return 0
+  fi
+
+  error_line=$(grep -E 'ERROR|FATAL' "$test_log" | tail -1 || true)
+  if [[ -z "$error_line" && -s "$test_dir/curl.log" ]]; then
+    error_line=$(tail -1 "$test_dir/curl.log")
+  fi
+  printf -- "$(t transport_test_result_failed)\n" "$label" "${error_line:-$(t transport_test_no_details)}"
+  return 1
+)
+
+test_b_transports() {
+  local resolved tcp_status="FAIL" current="direct" recommended=""
+  local hy2_ok=0 vless_ok=0 answer
+
+  echo "$(t transport_test_header)"
+  resolved=$(getent ahostsv4 "$B_DOMAIN" 2>/dev/null | awk 'NR==1 {print $1}')
+  if [[ -n "$resolved" ]]; then
+    printf -- "$(t transport_test_dns_ok)\n" "$B_DOMAIN" "$resolved"
+  else
+    printf -- "$(t transport_test_dns_failed)\n" "$B_DOMAIN"
+  fi
+
+  if python3 - "$B_DOMAIN" "$B_PORT" <<'PYEOF' >/dev/null 2>&1
+import socket
+import sys
+sock = socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=5)
+sock.close()
+PYEOF
+  then
+    tcp_status="OK"
+    printf -- "$(t transport_test_tcp_ok)\n" "$B_DOMAIN" "$B_PORT"
+  else
+    printf -- "$(t transport_test_tcp_failed)\n" "$B_DOMAIN" "$B_PORT"
+  fi
+
+  if jq -e '.outbounds[] | select(.tag == "hy2-out")' "$CONFIG" >/dev/null 2>&1; then
+    if test_b_transport "hy2-out" "$(t transport_test_label_hy2)"; then
+      hy2_ok=1
+      recommended="hy2-out"
+    fi
+  else
+    echo "$(t transport_test_hy2_missing)"
+  fi
+
+  if jq -e '.outbounds[] | select(.tag == "vless-out-b")' "$CONFIG" >/dev/null 2>&1; then
+    if test_b_transport "vless-out-b" "$(t transport_test_label_vless)"; then
+      vless_ok=1
+      [[ -z "$recommended" ]] && recommended="vless-out-b"
+    fi
+  else
+    echo "$(t transport_test_vless_missing)"
+  fi
+
+  if [[ "$tcp_status" == "FAIL" && "$hy2_ok" == "1" && "$vless_ok" == "0" ]]; then
+    echo "$(t transport_test_tcp_explanation1)"
+    echo "$(t transport_test_tcp_explanation2)"
+  fi
+
+  local transport_file=/etc/sing-box/transport.env
+  local TO_B_DEFAULT="direct"
+  [[ -f "$transport_file" ]] && source "$transport_file"
+  current="$TO_B_DEFAULT"
+
+  if [[ -z "$recommended" ]]; then
+    echo "$(t transport_test_none_working)"
+    return 1
+  fi
+
+  if [[ "$current" == "hy2-out" && "$hy2_ok" == "1" ]] || \
+     [[ "$current" == "vless-out-b" && "$vless_ok" == "1" ]]; then
+    printf -- "$(t transport_test_current_ok)\n" "$current"
+    [[ "$hy2_ok" == "1" && "$vless_ok" == "1" ]] && maybe_revoke_b_bootstrap
+    return 0
+  fi
+
+  printf -- "$(t transport_test_recommended)\n" "$recommended"
+  if [[ -t 0 ]]; then
+    read -rp "$(printf -- "$(t transport_test_switch_prompt)" "$recommended")" answer
+    if [[ "${answer,,}" != "n" ]]; then
+      printf 'TO_B_DEFAULT="%s"\n' "$recommended" > "$transport_file"
+      printf -- "$(t transport_switched)\n" "$recommended"
+      rebuild_config
+    fi
+  fi
+  [[ "$hy2_ok" == "1" && "$vless_ok" == "1" ]] && maybe_revoke_b_bootstrap
+  return 0
+}
+
+maybe_revoke_b_bootstrap() {
+  local installer="${B_INSTALL_PATH:-}" binary="${B_BINARY_PATH:-}" answer
+  [[ -t 0 && ( -n "$installer" || -n "$binary" ) ]] || return 0
+  [[ -z "$installer" || "$installer" == /opt/vpn/profiles/install-b-*.sh ]] || return 0
+  [[ -z "$binary" || "$binary" == /opt/vpn/profiles/sing-box-b-* ]] || return 0
+  [[ ( -n "$installer" && -f "$installer" ) || ( -n "$binary" && -f "$binary" ) ]] || return 0
+  read -rp "$(t b_bootstrap_revoke_prompt)" answer
+  [[ "${answer,,}" != "n" ]] || return 0
+  [[ -n "$installer" ]] && rm -f -- "$installer"
+  [[ -n "$binary" ]] && rm -f -- "$binary"
+  sed -i \
+    -e '/^B_INSTALL_PATH=/d' \
+    -e '/^B_BINARY_PATH=/d' \
+    -e '/^B_REALITY_PRIV=/d' \
+    -e '/^B_NEEDS_INSTALL=/d' \
+    "$CONFIG_FILE"
+  printf 'B_NEEDS_INSTALL=0\n' >> "$CONFIG_FILE"
+  B_INSTALL_PATH=""
+  B_BINARY_PATH=""
+  B_REALITY_PRIV=""
+  B_NEEDS_INSTALL=0
+  echo "$(t b_bootstrap_revoked)"
+}
+
 service_menu() {
   local LOG=/var/log/nginx/profile_access.log
   echo "$(t service_header)"
@@ -889,7 +1303,8 @@ service_menu() {
   echo "$(t svc_opt_traffic)"
   echo "$(t svc_opt_transport)"
   echo "$(t svc_opt_reality)"
-  local c; read -rp "$(t prompt_choice_17)" c
+  echo "$(t svc_opt_rebuild_profiles)"
+  local c; read -rp "$(t prompt_choice_18)" c
   case "$c" in
     1)
       list_names
@@ -912,7 +1327,7 @@ service_menu() {
       ;;
     2)
       echo "$(t version_stats_header)"
-      grep -o 'variant=[a-z]*' "$LOG" | sort | uniq -c
+      version_stats
       ;;
     3)
       echo "$(t live_log_header)"
@@ -925,10 +1340,13 @@ service_menu() {
       traffic_menu
       ;;
     6)
-      transport_menu
+      routing_menu
       ;;
     7)
       reality_domains_menu
+      ;;
+    8)
+      rebuild_all_profiles || true
       ;;
     *) echo "$(t invalid)" ;;
   esac
@@ -994,6 +1412,49 @@ reality_domains_menu() {
       ;;
     *) echo "$(t invalid)" ;;
   esac
+}
+
+routing_menu() {
+  echo "$(t routing_header)"
+  echo "$(t routing_opt_ab)"
+  echo "$(t routing_opt_direct_rules)"
+  echo "$(t routing_opt_test_ab)"
+  local c; read -rp "$(t prompt_choice_13_short)" c
+  case "$c" in
+    1) transport_menu ;;
+    2) direct_rules_route_menu ;;
+    3) test_b_transports || true ;;
+    *) echo "$(t invalid)" ;;
+  esac
+}
+
+direct_rules_route_menu() {
+  local route_file=/etc/sing-box/direct-route.env
+  local DIRECT_RULES_OUTBOUND="direct"
+  [[ -f "$route_file" ]] && source "$route_file"
+  if [[ "$WARP_ENABLED" != "1" || "$DIRECT_RULES_OUTBOUND" != "$WARP_TAG" ]]; then
+    DIRECT_RULES_OUTBOUND="direct"
+  fi
+
+  local opts=("direct")
+  local labels=("$(t direct_rules_label_direct)")
+  if [[ "$WARP_ENABLED" == "1" ]]; then
+    opts+=("$WARP_TAG")
+    labels+=("$(printf "$(t direct_rules_label_warp)" "$WARP_TAG")")
+  fi
+
+  printf -- "$(t direct_rules_header)\n" "$DIRECT_RULES_OUTBOUND"
+  local i
+  for ((i=0; i<${#opts[@]}; i++)); do
+    printf -- "$(t device_line)\n" "$((i+1))" "${labels[$i]}"
+  done
+  local n; read -rp "$(printf -- "$(t prompt_choice_1n)" "${#opts[@]}")" n
+  [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#opts[@]} )) || { echo "$(t invalid)"; return; }
+
+  local chosen="${opts[$((n-1))]}"
+  printf 'DIRECT_RULES_OUTBOUND="%s"\n' "$chosen" > "$route_file"
+  printf -- "$(t direct_rules_switched)\n" "$chosen"
+  rebuild_config
 }
 
 transport_menu() {
@@ -1063,7 +1524,8 @@ edit_client() {
       sed -i "s/^NAME=\".*\"/NAME=\"$new_name\"/" "$f"
       if [[ "$newkey" != "$oldkey" ]]; then
         mv "$f" "$CLI/$newkey.env"
-        rm -f "$PROFILES/${oldkey}_"*.json "$CONFDIR/${oldkey}.conf"
+        rm -f "$PROFILES/${oldkey}_"*.json
+        move_client_artifacts "$owner" "$oldkey" "$new_name" "$newkey"
       fi
       renamed=$((renamed+1))
     done
@@ -1079,11 +1541,12 @@ edit_client() {
   local oldfile="${DEVS[$((d-1))]}"
   local oldkey; oldkey=$(basename "$oldfile" .env)
 
-  local ONAME="" OPROFILE="" OWG_PRIV="" OWG_PUB="" OIP="" OPASS="" OVLESS_UUID="" OAIPS="" OTOKEN=""
-  NAME=""; PROFILE=""; WG_PRIV=""; WG_PUB=""; IP=""; PASS=""; VLESS_UUID=""; AIPS=""; TOKEN=""
+  local ONAME="" OPROFILE="" OWG_PRIV="" OWG_PUB="" OIP="" OPASS="" OVLESS_UUID="" OAIPS="" OTOKEN="" OWG_PROFILE_MODE="urltest"
+  NAME=""; PROFILE=""; WG_PRIV=""; WG_PUB=""; IP=""; PASS=""; VLESS_UUID=""; AIPS=""; TOKEN=""; WG_PROFILE_MODE=""
   source "$oldfile"
   ONAME="$NAME"; OPROFILE="$PROFILE"; OWG_PRIV="$WG_PRIV"; OWG_PUB="$WG_PUB"; OIP="$IP"
   OPASS="$PASS"; OVLESS_UUID="$VLESS_UUID"; OAIPS="$AIPS"; OTOKEN="$TOKEN"
+  OWG_PROFILE_MODE=$(wg_profile_mode)
 
   local new_name="$ONAME" new_dev="$OPROFILE"
 
@@ -1111,6 +1574,16 @@ edit_client() {
       3) want_wg=0 ;;
     esac
 
+    if [[ $want_wg -eq 1 && $want_proxy -eq 1 ]]; then
+      WG_PROFILE_MODE_CHOICE=""
+      prompt_wg_profile_mode "$OWG_PROFILE_MODE" || return
+      OWG_PROFILE_MODE="$WG_PROFILE_MODE_CHOICE"
+    elif [[ $want_wg -eq 1 ]]; then
+      OWG_PROFILE_MODE=urltest
+    else
+      OWG_PROFILE_MODE=""
+    fi
+
     if [[ $want_wg -eq 1 && -z "$OWG_PUB" ]]; then
       echo "$(t wg_routing_header)"; echo "$(t wg_routing_full)"; echo "$(t wg_routing_split)"
       local m; read -rp "$(t prompt_choice_12)" m
@@ -1119,7 +1592,7 @@ edit_client() {
       OWG_PRIV=$(wg genkey); OWG_PUB=$(echo "$OWG_PRIV" | wg pubkey); OIP="$newip"
     elif [[ $want_wg -eq 0 ]]; then
       OWG_PRIV=""; OWG_PUB=""; OIP=""; OAIPS=""
-      rm -f "$CONFDIR/${oldkey}.conf"
+      rm -f "$(client_wg_path "$ONAME" "$oldkey")" "/root/clients/${oldkey}.conf"
     fi
 
     if [[ $want_proxy -eq 1 && -z "$OPASS" ]]; then
@@ -1141,6 +1614,7 @@ edit_client() {
     if [[ -n "$OWG_PUB" ]]; then
       printf 'WG_PRIV="%s"\nWG_PUB="%s"\nIP=%s\n' "$OWG_PRIV" "$OWG_PUB" "$OIP"
       printf "AIPS=%s\n" "'$OAIPS'"
+      printf 'WG_PROFILE_MODE="%s"\n' "$OWG_PROFILE_MODE"
     fi
     if [[ -n "$OPASS" ]]; then
       printf 'PASS="%s"\n' "$OPASS"
@@ -1151,7 +1625,8 @@ edit_client() {
   if [[ "$newkey" != "$oldkey" ]]; then
     mv "$CLI/$newkey.env.tmp" "$CLI/$newkey.env"
     rm -f "$oldfile"
-    rm -f "$PROFILES/${oldkey}_"*.json "$CONFDIR/${oldkey}.conf"
+    rm -f "$PROFILES/${oldkey}_"*.json
+    move_client_artifacts "$ONAME" "$oldkey" "$new_name" "$newkey"
   else
     mv "$CLI/$newkey.env.tmp" "$CLI/$newkey.env"
   fi
@@ -1165,6 +1640,19 @@ edit_client() {
 if [[ "${1:-}" == "--cron-traffic" ]]; then
   traffic_update
   exit 0
+fi
+if [[ "${1:-}" == "--rebuild-config" ]]; then
+  ensure_base
+  rebuild_config
+  exit 0
+fi
+if [[ "${1:-}" == "--rebuild-profiles" ]]; then
+  rebuild_all_profiles
+  exit 0
+fi
+if [[ "${1:-}" == "--test-b-transports" ]]; then
+  test_b_transports
+  exit $?
 fi
 
 while true; do
