@@ -121,6 +121,13 @@ install_legacy_validator() {
   printf -- "$(t legacy_validator_ready)\n" "$version"
 }
 
+install_traffic_cron() {
+  (
+    crontab -l 2>/dev/null | grep -v -- '--cron-traffic' || true
+    echo "*/15 * * * * /usr/bin/flock -n /run/lock/sb-panel-traffic.lock /opt/vpn/sb-panel --cron-traffic >/dev/null 2>&1"
+  ) | crontab -
+}
+
 installation_failed() {
   local status=$?
   trap - ERR
@@ -421,6 +428,7 @@ EOF
     return 1
   fi
 
+  install_traffic_cron
   rm -f /root/sb-panel /root/vpn-setup.sh /root/i18n.sh
 
   printf "$(t update_completed)\n" "$backup"
@@ -1122,7 +1130,7 @@ if [[ -n "${B_INSTALL_PATH:-}" ]]; then
   echo "$(t binary_publish_ready)"
 fi
 
-(crontab -l 2>/dev/null | grep -v 'cron-traffic' || true; echo "*/15 * * * * /usr/bin/bash /opt/vpn/vpn-setup.sh --cron-traffic >/dev/null 2>&1") | crontab -
+install_traffic_cron
 
 complete_install_step 9
 else
