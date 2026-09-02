@@ -103,6 +103,20 @@ def require_array(value, path):
     return value
 
 
+def optional_outbound(policy, key, mapping):
+    """Resolve an optional standard outbound.
+
+    Removing its key from the per-device outbounds file is the supported way
+    to disable that transport for this device. A present but malformed object
+    remains an error so configuration mistakes are not silently hidden.
+    """
+    if key not in policy or policy[key] is None:
+        return None
+    entry = resolve(copy.deepcopy(policy[key]), mapping)
+    require_object(entry, f"outbounds.{key}")
+    return entry
+
+
 def validate_entries(entries, path, tags):
     for index, entry in enumerate(entries):
         item_path = f"{path}[{index}]"
@@ -196,23 +210,22 @@ def main():
     wg_entry = None
     mode = env("SBP_WG_PROFILE_MODE", "urltest")
     if env("SBP_WG_ENABLED") == "1" and mode != "disabled":
-        wg_entry = resolve(copy.deepcopy(outbound_policy.get("wireguard")), substitutions())
-        require_object(wg_entry, "outbounds.wireguard")
-        base.setdefault("endpoints", []).append(wg_entry)
+        wg_entry = optional_outbound(outbound_policy, "wireguard", substitutions())
+        if wg_entry is not None:
+            base.setdefault("endpoints", []).append(wg_entry)
 
     if env("SBP_HY2_ENABLED") == "1":
-        entry = resolve(copy.deepcopy(outbound_policy.get("hysteria2")), substitutions())
-        require_object(entry, "outbounds.hysteria2")
-        proxy_entries.append(entry)
-        proxy_tags.append(entry.get("tag"))
+        entry = optional_outbound(outbound_policy, "hysteria2", substitutions())
+        if entry is not None:
+            proxy_entries.append(entry)
+            proxy_tags.append(entry.get("tag"))
 
-    if env("SBP_VLESS_ENABLED") == "1":
+    if env("SBP_VLESS_ENABLED") == "1" and "vless" in outbound_policy and outbound_policy["vless"] is not None:
         domains = [item for item in env("SBP_VLESS_DOMAINS").splitlines() if item]
         if not domains:
             fail("E_CONTEXT", "VLESS_DOMAINS")
         for domain in domains:
-            entry = resolve(copy.deepcopy(outbound_policy.get("vless")), substitutions(domain))
-            require_object(entry, "outbounds.vless")
+            entry = optional_outbound(outbound_policy, "vless", substitutions(domain))
             proxy_entries.append(entry)
             proxy_tags.append(entry.get("tag"))
 
@@ -224,12 +237,13 @@ def main():
     extras = resolve(copy.deepcopy(extras + variant_extras), substitutions(env("SBP_VLESS_DEST")))
     base["outbounds"].extend(proxy_entries + extras)
 
-    if proxy_tags:
+    auto_members = list(proxy_tags)
+    if wg_entry is not None and mode == "urltest":
+        auto_members.append(wg_entry["tag"])
+    if auto_members:
         auto = resolve(copy.deepcopy(outbound_policy.get("urltest")), substitutions())
         require_object(auto, "outbounds.urltest")
-        auto["outbounds"] = list(proxy_tags)
-        if wg_entry is not None and mode == "urltest":
-            auto["outbounds"].append(wg_entry["tag"])
+        auto["outbounds"] = auto_members
         base["outbounds"].append(auto)
 
     selector = resolve(copy.deepcopy(outbound_policy.get("selector")), substitutions())
@@ -237,12 +251,12 @@ def main():
     selector_members = list(proxy_tags)
     if wg_entry is not None:
         selector_members.append(wg_entry["tag"])
-    if proxy_tags:
+    if auto_members:
         selector_members.append("auto")
     if not selector_members:
         fail("E_NO_CLIENT_OUTBOUND", "outbounds.selector")
     selector["outbounds"] = selector_members
-    selector["default"] = "auto" if proxy_tags else selector_members[0]
+    selector["default"] = "auto" if auto_members else selector_members[0]
     base["outbounds"].append(selector)
 
     dns_domains = base["dns"]["rules"][0].setdefault("domain", [])

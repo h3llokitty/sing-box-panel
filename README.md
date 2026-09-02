@@ -168,6 +168,10 @@ while rendering a profile. VLESS is expanded once per active Reality domain,
 and selector/urltest membership is derived from the device transports and its
 WireGuard profile mode. `extra_outbounds`, `modern_extra_outbounds`, and
 `legacy_extra_outbounds` can hold additional complete outbound objects.
+Removing the `wireguard`, `hysteria2`, or `vless` key (or setting it to `null`)
+disables that transport for the device; selector and urltest membership are
+rebuilt from the remaining transports. At least one usable transport must
+remain.
 
 Both variants are rendered to temporary files and published atomically only
 after validation. Modern profiles are checked by the managed runtime;
