@@ -240,6 +240,48 @@ validate_ruleset_storage() {
   validate_ruleset_url "${1}/${GEOIP_RU_RELATIVE_PATH}"
 }
 
+ensure_a_certificate() {
+  local domain="$1" email="$2"
+  local certbot_cert="/etc/letsencrypt/live/${domain}/fullchain.pem"
+  local certbot_key="/etc/letsencrypt/live/${domain}/privkey.pem"
+  local certmagic_cert="/var/lib/sing-box/.local/share/certmagic/certificates/acme-v02.api.letsencrypt.org-directory/${domain}/${domain}.crt"
+
+  [[ -s "$certbot_cert" && -s "$certbot_key" ]] && return 0
+  if ! command -v certbot >/dev/null 2>&1; then
+    apt-get update -qq
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq certbot
+  fi
+  install -d -m 0755 /var/www/letsencrypt
+  cat > /etc/nginx/sites-available/vpn-acme <<NGINX
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${domain};
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+        default_type text/plain;
+    }
+    location / { return 404; }
+}
+NGINX
+  ln -sfn /etc/nginx/sites-available/vpn-acme /etc/nginx/sites-enabled/vpn-acme
+  nginx -t
+  if systemctl is-active --quiet nginx; then
+    systemctl reload nginx
+  else
+    systemctl start nginx
+  fi
+  if certbot certonly --non-interactive --agree-tos --keep-until-expiring \
+      --email "$email" --webroot -w /var/www/letsencrypt \
+      --cert-name "$domain" -d "$domain"; then
+    return 0
+  fi
+  # Existing installations may keep using their still-valid CertMagic files;
+  # a failed migration must not take down a running VPN during an update.
+  [[ -s "$certmagic_cert" ]] && return 0
+  return 1
+}
+
 cleanup_failed_install() {
   echo
   echo "=================================================="
@@ -353,6 +395,40 @@ update_existing_install() {
   jq empty "$SCRIPT_DIR/templates/template.json" "$SCRIPT_DIR/templates/template-legacy.json"
   PYTHONPYCACHEPREFIX=/tmp/sing-box-panel-pycache python3 -m py_compile "$SCRIPT_DIR/render-client-profile.py"
   install_legacy_validator
+
+  local update_domain update_email
+  read -r update_domain update_email < <(
+    set +u
+    source /etc/sing-box/vpn-panel.env
+    printf '%s %s\n' "${A_DOMAIN:-}" "${ACME_EMAIL:-}"
+  )
+  if [[ -n "$update_domain" && -n "$update_email" ]]; then
+    if ! command -v certbot >/dev/null 2>&1; then
+      apt-get update -qq
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq certbot
+    fi
+    ensure_a_certificate "$update_domain" "$update_email"
+    if [[ -s "/etc/letsencrypt/live/${update_domain}/fullchain.pem" && \
+          -s "/etc/letsencrypt/live/${update_domain}/privkey.pem" ]]; then
+      if [[ -f /etc/nginx/sites-available/profiles ]]; then
+        sed -i -E \
+          -e "s#^([[:space:]]*ssl_certificate[[:space:]]+).+;#\\1/etc/letsencrypt/live/${update_domain}/fullchain.pem;#" \
+          -e "s#^([[:space:]]*ssl_certificate_key[[:space:]]+).+;#\\1/etc/letsencrypt/live/${update_domain}/privkey.pem;#" \
+          /etc/nginx/sites-available/profiles
+      fi
+      install -d -m 0755 /etc/letsencrypt/renewal-hooks/deploy
+      cat > /etc/letsencrypt/renewal-hooks/deploy/sing-box-panel <<'HOOK'
+#!/usr/bin/env bash
+set -e
+systemctl restart sing-box
+nginx -s reload
+HOOK
+      chmod 0755 /etc/letsencrypt/renewal-hooks/deploy/sing-box-panel
+      systemctl disable --now nginx-cert-reload.path 2>/dev/null || true
+      rm -f /etc/systemd/system/nginx-cert-reload.path /etc/systemd/system/nginx-cert-reload.service
+      systemctl daemon-reload
+    fi
+  fi
 
   local stamp backup
   stamp=$(date +%Y%m%d%H%M%S)
@@ -482,7 +558,7 @@ if (( INSTALL_STEP < 1 )); then
   step "$(t step1)"
   apt-get update -qq
   DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-    curl git build-essential wireguard-tools nginx libnginx-mod-stream jq qrencode python3 openssl dnsutils tmux
+    curl git build-essential wireguard-tools nginx libnginx-mod-stream jq qrencode python3 openssl dnsutils tmux certbot
   complete_install_step 1
 else
   printf "$(t step_skipped)\n" 1
@@ -927,6 +1003,7 @@ fi
 
 if (( INSTALL_STEP < 8 )); then
 step "$(t step8)"
+ensure_a_certificate "$A_DOMAIN" "$ACME_EMAIL"
   bash -n "$SCRIPT_DIR/vpn-setup.sh" "$SCRIPT_DIR/i18n.sh" "$SCRIPT_DIR/install-warp.sh"
   jq empty "$SCRIPT_DIR/templates/server-routing.json"
   jq empty "$SCRIPT_DIR/templates/client-routing.json"
@@ -976,6 +1053,13 @@ EOF
 chmod +x /opt/vpn/sb-panel
 
 echo "$(t building_initial_config)"
+# nginx owns TCP/80 and TCP/443 after installation. Release both ports while
+# sing-box performs its one-time ACME bootstrap; subsequent rebuilds use the
+# certificate files and do not invoke inline ACME.
+if [[ ! -s "/etc/letsencrypt/live/${A_DOMAIN}/fullchain.pem" && \
+      ! -s "/var/lib/sing-box/.local/share/certmagic/certificates/acme-v02.api.letsencrypt.org-directory/${A_DOMAIN}/${A_DOMAIN}.crt" ]]; then
+  systemctl stop nginx 2>/dev/null || true
+fi
 if ! VPN_CONFIG="$CONFIG_ENV" /opt/vpn/vpn-setup.sh --rebuild-config; then
   echo "$(t singbox_start_failed)"
   journalctl -u sing-box -n 40 --no-pager || true
@@ -1020,8 +1104,14 @@ log_format profile_access
     '$time_iso8601 | ip=$remote_addr | key=$profile_key | variant=$sb_variant | ua="$http_user_agent"';
 NGINX
 
-CRT="/var/lib/sing-box/.local/share/certmagic/certificates/acme-v02.api.letsencrypt.org-directory/${A_DOMAIN}/${A_DOMAIN}.crt"
-KEY="/var/lib/sing-box/.local/share/certmagic/certificates/acme-v02.api.letsencrypt.org-directory/${A_DOMAIN}/${A_DOMAIN}.key"
+if [[ -s "/etc/letsencrypt/live/${A_DOMAIN}/fullchain.pem" && \
+      -s "/etc/letsencrypt/live/${A_DOMAIN}/privkey.pem" ]]; then
+  CRT="/etc/letsencrypt/live/${A_DOMAIN}/fullchain.pem"
+  KEY="/etc/letsencrypt/live/${A_DOMAIN}/privkey.pem"
+else
+  CRT="/var/lib/sing-box/.local/share/certmagic/certificates/acme-v02.api.letsencrypt.org-directory/${A_DOMAIN}/${A_DOMAIN}.crt"
+  KEY="/var/lib/sing-box/.local/share/certmagic/certificates/acme-v02.api.letsencrypt.org-directory/${A_DOMAIN}/${A_DOMAIN}.key"
+fi
 
 cat > /etc/nginx/sites-available/profiles <<NGINX2
 server {
@@ -1063,23 +1153,18 @@ NGINX2
 [[ -f /etc/nginx/sites-enabled/default ]] && rm -f /etc/nginx/sites-enabled/default
 [[ -L /etc/nginx/sites-enabled/profiles ]] || ln -s /etc/nginx/sites-available/profiles /etc/nginx/sites-enabled/profiles
 
-cat > /etc/systemd/system/nginx-cert-reload.path <<PATHUNIT
-[Unit]
-Description=Watch sing-box cert for nginx reload
-[Path]
-PathModified=${CRT}
-[Install]
-WantedBy=multi-user.target
-PATHUNIT
-cat > /etc/systemd/system/nginx-cert-reload.service <<SVCUNIT
-[Unit]
-Description=Reload nginx after cert change
-[Service]
-Type=oneshot
-ExecStart=/usr/sbin/nginx -s reload
-SVCUNIT
+systemctl disable --now nginx-cert-reload.path 2>/dev/null || true
+rm -f /etc/systemd/system/nginx-cert-reload.path /etc/systemd/system/nginx-cert-reload.service
 systemctl daemon-reload
-systemctl enable --now nginx-cert-reload.path
+
+install -d -m 0755 /etc/letsencrypt/renewal-hooks/deploy
+cat > /etc/letsencrypt/renewal-hooks/deploy/sing-box-panel <<'HOOK'
+#!/usr/bin/env bash
+set -e
+systemctl restart sing-box
+nginx -s reload
+HOOK
+chmod 0755 /etc/letsencrypt/renewal-hooks/deploy/sing-box-panel
 
 echo "$(t waiting_for_certificate)"
 for _ in $(seq 1 "$CERT_WAIT_SECONDS"); do
@@ -1089,6 +1174,12 @@ done
 if [[ ! -s "$CRT" || ! -s "$KEY" ]]; then
   echo "$(t certificate_wait_failed)"
   journalctl -u sing-box -n 40 --no-pager || true
+  exit 1
+fi
+# Replace the bootstrap inline-ACME block with stable certificate file paths
+# before nginx takes ownership of the public TCP ports.
+if ! VPN_CONFIG="$CONFIG_ENV" /opt/vpn/vpn-setup.sh --rebuild-config; then
+  echo "$(t singbox_start_failed)"
   exit 1
 fi
 nginx -t

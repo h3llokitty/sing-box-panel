@@ -466,8 +466,8 @@ T[warp_result_backup.ru]="  резервная копия: %s"
 
 # ── write_nginx_stream ──────────────────────────────────────
 
-T[cert_not_ready_yet.en]="Certificate for %s has not been issued by ACME yet — nginx will restart automatically once it appears (see nginx-cert-reload.path)."
-T[cert_not_ready_yet.ru]="Сертификат для %s ещё не выпущен через ACME — nginx перезапустится автоматически, как только он появится (см. nginx-cert-reload.path)."
+T[cert_not_ready_yet.en]="Certificate for %s is not ready yet — check certbot.timer and the renewal deploy hook."
+T[cert_not_ready_yet.ru]="Сертификат для %s ещё не готов — проверьте certbot.timer и deploy-hook продления."
 
 # ── vpn-setup.sh startup ────────────────────────────────────
 

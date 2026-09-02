@@ -33,6 +33,7 @@ source "$CONFIG_FILE"
 : "${WARP_TAG:=WARP}"
 : "${FILES_DOMAIN:=}"
 : "${FILES_INTERNAL_PORT:=9443}"
+: "${SERVICE_WAIT_SECONDS:=30}"
 ### ─────────────────────────────────────────────────────────
 
 AIPS_SPLIT='"0.0.0.0/5","8.0.0.0/7","11.0.0.0/8","12.0.0.0/6","16.0.0.0/4","32.0.0.0/3","64.0.0.0/2","128.0.0.0/3","160.0.0.0/5","168.0.0.0/6","172.0.0.0/12","172.32.0.0/11","172.64.0.0/10","172.128.0.0/9","173.0.0.0/8","174.0.0.0/7","176.0.0.0/4","192.0.0.0/9","192.128.0.0/11","192.160.0.0/13","192.169.0.0/16","192.170.0.0/15","192.172.0.0/14","192.176.0.0/12","192.192.0.0/10","193.0.0.0/8","194.0.0.0/7","196.0.0.0/6","200.0.0.0/5","208.0.0.0/4"'
@@ -62,6 +63,18 @@ TEMPLATE_LEGACY=/opt/vpn/template-legacy.json
 CLIENT_PROFILE_RENDERER=/opt/vpn/render-client-profile.py
 LEGACY_SING_BOX=/opt/vpn/bin/sing-box-legacy
 PROFILES=/opt/vpn/profiles
+CERTBOT_CERT_PATH="/etc/letsencrypt/live/${A_DOMAIN}/fullchain.pem"
+CERTBOT_KEY_PATH="/etc/letsencrypt/live/${A_DOMAIN}/privkey.pem"
+CERTMAGIC_DIR="/var/lib/sing-box/.local/share/certmagic/certificates/acme-v02.api.letsencrypt.org-directory/${A_DOMAIN}"
+CERTMAGIC_CERT_PATH="${CERTMAGIC_DIR}/${A_DOMAIN}.crt"
+CERTMAGIC_KEY_PATH="${CERTMAGIC_DIR}/${A_DOMAIN}.key"
+if [[ -s "$CERTBOT_CERT_PATH" && -s "$CERTBOT_KEY_PATH" ]]; then
+  A_CERT_PATH="$CERTBOT_CERT_PATH"
+  A_KEY_PATH="$CERTBOT_KEY_PATH"
+else
+  A_CERT_PATH="$CERTMAGIC_CERT_PATH"
+  A_KEY_PATH="$CERTMAGIC_KEY_PATH"
+fi
 LEGACY_CLIENT_FILES_ROOT=/opt/vpn
 CLIENT_FILES_ROOT=/opt/vpn/clients
 mkdir -p "$CLI" "$PROFILES"
@@ -125,8 +138,7 @@ write_nginx_stream() {
     fi
   fi
 
-  local cert_path="/var/lib/sing-box/.local/share/certmagic/certificates/acme-v02.api.letsencrypt.org-directory/${A_DOMAIN}/${A_DOMAIN}.crt"
-  if [[ -f "$cert_path" ]]; then
+  if [[ -f "$A_CERT_PATH" ]]; then
     nginx -t
     if systemctl is-active --quiet nginx; then
       systemctl reload nginx
@@ -390,15 +402,27 @@ rebuild_config() {
     DIRECT_RULES_OUTBOUND="direct"
   fi
 
-  local config_new="${CONFIG}.new"
+  local hy2_tls config_new="${CONFIG}.new"
+  if [[ -s "$A_CERT_PATH" && -s "$A_KEY_PATH" ]]; then
+    hy2_tls=$(jq -nc \
+      --arg domain "$A_DOMAIN" --arg cert "$A_CERT_PATH" --arg key "$A_KEY_PATH" \
+      '{enabled:true,server_name:$domain,alpn:["h3"],certificate_path:$cert,key_path:$key}')
+  else
+    # Bootstrap only: sing-box obtains the first certificate while nginx is stopped.
+    # Every later rebuild uses the issued files directly, so an ACME renewal failure
+    # cannot take the VPN service down.
+    hy2_tls=$(jq -nc \
+      --arg domain "$A_DOMAIN" --arg email "$ACME_EMAIL" \
+      '{enabled:true,server_name:$domain,alpn:["h3"],acme:{domain:[$domain],email:$email}}')
+  fi
   python3 - "$SERVER_TEMPLATE" "$SERVER_ROUTING" "$config_new" \
-    "${HY2_PORT}" "${users}" "${HY2_OBFS}" "${A_DOMAIN}" "${ACME_EMAIL}" "${vless_inbound}" \
+    "${HY2_PORT}" "${users}" "${HY2_OBFS}" "${hy2_tls}" "${vless_inbound}" \
     "${WG_NET}" "${A_PRIV}" "${WG_PORT}" "${peers}" "${B_DOMAIN}" "${B_PORT}" "${B_PASS}" \
     "${b_vless_outbound}" "${b_selector}" "${b_final}" "${v2users}" "${b_hy2_outbound}" "${v2b_outbounds}" \
     "${warp_outbound}" "${WARP_ENABLED}" "${WARP_TAG}" "${DIRECT_RULES_OUTBOUND}" <<'PYEOF'
 import sys, json
 tmpl, routing, out = sys.argv[1:4]
-(hy2_port, users, hy2_obfs, a_domain, acme_email, vless_inbound,
+(hy2_port, users, hy2_obfs, hy2_tls, vless_inbound,
  wg_net, a_priv, wg_port, peers, b_domain, b_port, b_pass,
  b_vless_outbound, b_selector, b_final, v2users,
  b_hy2_outbound, v2b_outbounds, warp_outbound,
@@ -408,8 +432,7 @@ repl = {
     "__HY2_PORT__": hy2_port,
     "__USERS__": users,
     "__HY2_OBFS__": hy2_obfs,
-    "__A_DOMAIN__": a_domain,
-    "__ACME_EMAIL__": acme_email,
+    "__HY2_TLS__": hy2_tls,
     "__VLESS_INBOUND__": vless_inbound,
     "__WG_NET__": wg_net,
     "__A_PRIV__": a_priv,
@@ -454,6 +477,27 @@ PYEOF
   systemctl enable --now sing-box >/dev/null 2>&1 || true
   systemctl restart --no-block sing-box
   echo "$(t singbox_restarted)"
+
+  local service_ready=0 service_pid
+  for _ in $(seq 1 "$SERVICE_WAIT_SECONDS"); do
+    if systemctl is-active --quiet sing-box && \
+       ss -lntH 'sport = :8080' 2>/dev/null | grep -q '127.0.0.1:8080'; then
+      service_pid=$(systemctl show sing-box -p MainPID --value)
+      sleep 2
+      if systemctl is-active --quiet sing-box && \
+         [[ "$(systemctl show sing-box -p MainPID --value)" == "$service_pid" ]] && \
+         ss -lntH 'sport = :8080' 2>/dev/null | grep -q '127.0.0.1:8080'; then
+        service_ready=1
+        break
+      fi
+    fi
+    sleep 1
+  done
+  if [[ "$service_ready" != "1" ]]; then
+    echo "$(t singbox_start_failed)" >&2
+    journalctl -u sing-box -n 40 --no-pager >&2 || true
+    return 1
+  fi
 
   # пересобрать все выданные клиентские профили (актуализирует теги/логику у всех разом)
   local rf rkey

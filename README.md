@@ -91,6 +91,13 @@ The same independent choice is offered for the default
 routing and outbound files are never overwritten by an update.
 Every update creates a rollback backup under `/opt/vpn/backups/update-*`.
 
+Server A certificates are issued and renewed by certbot through the nginx
+HTTP-01 webroot. sing-box and the profile server read the same files from
+`/etc/letsencrypt/live/<A_DOMAIN>/`; the certbot deploy hook restarts sing-box
+and reloads nginx only after a successful renewal. Existing CertMagic files are
+accepted as a migration fallback, but inline ACME is not retained after the
+first valid certificate is available.
+
 ## Optional Cloudflare WARP outbound
 
 Server A can install a local Cloudflare WARP SOCKS5 proxy on

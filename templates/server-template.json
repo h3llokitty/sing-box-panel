@@ -10,8 +10,7 @@
     { "type": "hysteria2", "tag": "hy2-in", "listen": "::", "listen_port": __HY2_PORT__,
       "users": [ __USERS__ ],
       "obfs": { "type": "salamander", "password": "__HY2_OBFS__" },
-      "tls": { "enabled": true, "server_name": "__A_DOMAIN__", "alpn": ["h3"],
-               "acme": { "domain": ["__A_DOMAIN__"], "email": "__ACME_EMAIL__" } } }__VLESS_INBOUND__
+      "tls": __HY2_TLS__ }__VLESS_INBOUND__
   ],
   "endpoints": [
     { "type": "wireguard", "tag": "wg-in", "system": false, "mtu": 1408,
