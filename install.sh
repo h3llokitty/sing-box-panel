@@ -421,7 +421,7 @@ update_existing_install() {
 #!/usr/bin/env bash
 set -e
 systemctl restart sing-box
-nginx -s reload
+systemctl reload nginx
 HOOK
       chmod 0755 /etc/letsencrypt/renewal-hooks/deploy/sing-box-panel
       systemctl disable --now nginx-cert-reload.path 2>/dev/null || true
@@ -1162,7 +1162,7 @@ cat > /etc/letsencrypt/renewal-hooks/deploy/sing-box-panel <<'HOOK'
 #!/usr/bin/env bash
 set -e
 systemctl restart sing-box
-nginx -s reload
+systemctl reload nginx
 HOOK
 chmod 0755 /etc/letsencrypt/renewal-hooks/deploy/sing-box-panel
 
