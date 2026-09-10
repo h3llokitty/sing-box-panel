@@ -388,7 +388,7 @@ update_existing_install() {
     done
   fi
 
-  bash -n "$SCRIPT_DIR/vpn-setup.sh" "$SCRIPT_DIR/i18n.sh" "$SCRIPT_DIR/install-warp.sh"
+  bash -n "$SCRIPT_DIR/vpn-setup.sh" "$SCRIPT_DIR/i18n.sh" "$SCRIPT_DIR/install-warp.sh" "$SCRIPT_DIR/generate-b-installer.sh"
   jq empty "$SCRIPT_DIR/templates/server-routing.json"
   jq empty "$SCRIPT_DIR/templates/client-routing.json"
   jq empty "$SCRIPT_DIR/templates/client-outbounds.json"
@@ -515,8 +515,9 @@ if [[ -f "$DONE_MARKER" ]]; then
   echo "$(t existing_install_action)"
   echo "$(t existing_install_update)"
   echo "$(t existing_install_reinstall)"
+  echo "$(t existing_install_get_b)"
   echo "$(t existing_install_cancel)"
-  read -rp "$(t prompt_choice_012_default1)" EXISTING_ACTION
+  read -rp "$(t prompt_choice_013_default1)" EXISTING_ACTION
   case "${EXISTING_ACTION:-1}" in
     1)
       update_existing_install
@@ -532,6 +533,10 @@ if [[ -f "$DONE_MARKER" ]]; then
       echo "$(t reinstall_proceeding)"
       cleanup_failed_install
       rm -f "$DONE_MARKER"
+      ;;
+    3)
+      SBP_LANG="$LANG_CODE" "$SCRIPT_DIR/generate-b-installer.sh" /etc/sing-box/vpn-panel.env
+      exit $?
       ;;
     0)
       echo "$(t reinstall_cancelled)"
@@ -852,141 +857,10 @@ fi
 source "$CONFIG_ENV"
 
 if [[ "${B_NEEDS_INSTALL:-0}" == "1" ]]; then
-  if [[ -n "${B_INSTALL_PATH:-}" && -n "${B_BINARY_PATH:-}" && -f "$B_INSTALL_PATH" && -f "$B_BINARY_PATH" ]]; then
-    printf "$(t generated_b_reused)\n" "$B_INSTALL_PATH"
-  else
-  echo
-  echo "$(t generating_install_b)"
-  mkdir -p /opt/vpn/profiles
-  B_TOKEN=$(openssl rand -hex 8)
-  B_INSTALL_PATH="/opt/vpn/profiles/install-b-${B_TOKEN}.sh"
-  B_BINARY_PATH="/opt/vpn/profiles/sing-box-b-${B_TOKEN}"
-  install -m 0755 "$SING_BOX_BIN" "$B_BINARY_PATH"
-
-  cat > "$B_INSTALL_PATH" <<BEOF
-#!/usr/bin/env bash
-set -euo pipefail
-
-if [[ \$EUID -ne 0 ]]; then
-  echo "$(t b_must_run_as_root)"
-  exit 1
+  SBP_LANG="$LANG_CODE" "$SCRIPT_DIR/generate-b-installer.sh" "$CONFIG_ENV" 1
+  # Reload the published paths written by the generator for later verification and summary output.
+  source "$CONFIG_ENV"
 fi
-
-echo "$(t b_installing)"
-apt-get update -qq
-NEEDRESTART_MODE=l DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl gnupg dnsutils
-
-B_DETECTED_IP=\$(curl -4 -fsS --max-time 10 https://ifconfig.me || hostname -I | awk '{print \$1}')
-B_RESOLVED_IP=\$(dig +short "${B_DOMAIN}" @1.1.1.1 | tail -1)
-if [[ -z "\$B_DETECTED_IP" || "\$B_RESOLVED_IP" != "\$B_DETECTED_IP" ]]; then
-  printf "$(t b_dns_mismatch)\n" "${B_DOMAIN}" "\${B_RESOLVED_IP:-not resolved}" "\${B_DETECTED_IP:-unknown}"
-  exit 1
-fi
-
-mkdir -p /etc/apt/keyrings
-curl -fsSL https://sing-box.app/gpg.key -o /etc/apt/keyrings/sagernet.asc
-chmod a+r /etc/apt/keyrings/sagernet.asc
-cat > /etc/apt/sources.list.d/sagernet.sources <<'REPO'
-Types: deb
-URIs: https://deb.sagernet.org/
-Suites: *
-Components: *
-Enabled: yes
-Signed-By: /etc/apt/keyrings/sagernet.asc
-REPO
-apt-get update -qq
-NEEDRESTART_MODE=l DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sing-box
-
-mkdir -p /usr/local/lib/sing-box-panel /usr/local/bin
-curl -fsSL "https://${A_DOMAIN}:${PROFILE_PORT:-8443}/$(basename "$B_BINARY_PATH")" -o /usr/local/lib/sing-box-panel/sing-box.new
-echo "${SING_BOX_SHA256}  /usr/local/lib/sing-box-panel/sing-box.new" | sha256sum -c -
-install -m 0755 /usr/local/lib/sing-box-panel/sing-box.new /usr/local/lib/sing-box-panel/sing-box
-rm -f /usr/local/lib/sing-box-panel/sing-box.new
-ln -sfn /usr/local/lib/sing-box-panel/sing-box /usr/local/bin/sing-box
-[[ "\$(sha256sum /usr/local/lib/sing-box-panel/sing-box | awk '{print \$1}')" == "${SING_BOX_SHA256}" ]]
-apt-mark hold sing-box >/dev/null
-
-mkdir -p /etc/systemd/system/sing-box.service.d
-cat > /etc/systemd/system/sing-box.service.d/10-panel-binary.conf <<'OVERRIDE'
-[Service]
-ExecStart=
-ExecStart=/usr/local/lib/sing-box-panel/sing-box -D /var/lib/sing-box -C /etc/sing-box run
-OVERRIDE
-
-mkdir -p /etc/sing-box
-
-cat > /etc/sing-box/config.json <<CFGEOF
-{
-  "log": { "level": "info", "timestamp": true },
-  "inbounds": [
-    {
-      "type": "hysteria2", "tag": "hy2-in", "listen": "::", "listen_port": ${B_PORT},
-      "users": [ { "password": "${B_PASS}" } ],
-      "tls": { "enabled": true, "server_name": "${B_DOMAIN}", "alpn": ["h3"],
-               "acme": { "domain": ["${B_DOMAIN}"], "email": "${ACME_EMAIL}" } }
-    },
-    {
-      "type": "vless", "tag": "vless-in", "listen": "::", "listen_port": ${B_PORT},
-      "users": [ { "uuid": "${B_VLESS_UUID}", "flow": "xtls-rprx-vision" } ],
-      "tls": { "enabled": true, "server_name": "${B_VLESS_SNI}",
-        "reality": { "enabled": true,
-          "handshake": { "server": "${B_VLESS_DEST}", "server_port": 443 },
-          "private_key": "${B_REALITY_PRIV}",
-          "short_id": ["${B_REALITY_SID}"] } }
-    }
-  ],
-  "outbounds": [ { "type": "direct", "tag": "direct" } ],
-  "route": { "rules": [ { "action": "sniff" } ], "final": "direct" }
-}
-CFGEOF
-
-/usr/local/lib/sing-box-panel/sing-box check -c /etc/sing-box/config.json
-systemctl daemon-reload
-systemctl enable sing-box
-if ! systemctl restart sing-box; then
-  echo "$(t b_service_failed)"
-  journalctl -u sing-box -n 40 --no-pager || true
-  exit 1
-fi
-for _ in \$(seq 1 ${SERVICE_WAIT_SECONDS}); do
-  systemctl is-active --quiet sing-box && break
-  sleep 1
-done
-if ! systemctl is-active --quiet sing-box; then
-  echo "$(t b_service_failed)"
-  journalctl -u sing-box -n 40 --no-pager || true
-  exit 1
-fi
-
-echo
-echo "=================================================="
-echo "$(t b_configured)"
-printf "$(t b_domain_label)\n" "${B_DOMAIN}"
-printf "$(t b_port_label)\n" "${B_PORT}"
-printf "$(t singbox_runtime_label)\n" "\$(/usr/local/lib/sing-box-panel/sing-box version | sed -n '1s/^sing-box version //p')" "${SING_BOX_REV}"
-echo "=================================================="
-echo
-printf "$(t b_dns_reminder)\n" "${B_DOMAIN}" "${B_PORT}"
-echo "$(t b_verify_from_a_reminder1)"
-echo "$(t b_verify_from_a_reminder2)"
-BEOF
-
-  chmod +x "$B_INSTALL_PATH"
-
-  sed -i \
-    -e '/^B_INSTALL_PATH=/d' \
-    -e '/^B_BINARY_PATH=/d' \
-    "$CONFIG_ENV"
-  printf 'B_INSTALL_PATH="%s"\nB_BINARY_PATH="%s"\n' "$B_INSTALL_PATH" "$B_BINARY_PATH" >> "$CONFIG_ENV"
-
-  printf "$(t install_b_ready)\n" "$B_DOMAIN"
-  echo
-  echo "  curl -fsSL https://${A_DOMAIN}:${PROFILE_PORT:-8443}/$(basename "$B_INSTALL_PATH") | sudo bash"
-  echo
-  echo "$(t link_will_work_after)"
-  fi
-fi
-
 if (( INSTALL_STEP < 7 )); then
   step "$(t step7)"
   RESOLVED=$(dig +short "$A_DOMAIN" @1.1.1.1 2>/dev/null | tail -1)
@@ -1004,7 +878,7 @@ fi
 if (( INSTALL_STEP < 8 )); then
 step "$(t step8)"
 ensure_a_certificate "$A_DOMAIN" "$ACME_EMAIL"
-  bash -n "$SCRIPT_DIR/vpn-setup.sh" "$SCRIPT_DIR/i18n.sh" "$SCRIPT_DIR/install-warp.sh"
+  bash -n "$SCRIPT_DIR/vpn-setup.sh" "$SCRIPT_DIR/i18n.sh" "$SCRIPT_DIR/install-warp.sh" "$SCRIPT_DIR/generate-b-installer.sh"
   jq empty "$SCRIPT_DIR/templates/server-routing.json"
   jq empty "$SCRIPT_DIR/templates/client-routing.json"
   jq empty "$SCRIPT_DIR/templates/client-outbounds.json"
