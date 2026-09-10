@@ -311,6 +311,45 @@ cleanup_failed_install() {
   echo "$(t rollback_binary_kept)"
 }
 
+ensure_b_binary_delivery() {
+  local conf=/etc/nginx/sites-available/profiles backup tmp stamp
+  [[ -f "$conf" ]] || { printf "$(t b_delivery_config_missing)\n" "$conf" >&2; return 1; }
+  if grep -qE 'location[[:space:]]+~[[:space:]]+\^/sing-box-b-' "$conf"; then
+    return 0
+  fi
+
+  stamp=$(date +%Y%m%d%H%M%S)
+  backup="${conf}.before-binary-location-${stamp}"
+  tmp=$(mktemp)
+  cp -a "$conf" "$backup"
+  if ! awk '
+    /^[[:space:]]*location \/ \{ return 404; \}$/ && !inserted {
+      print "    location ~ ^/sing-box-b-[a-f0-9]+$ {"
+      print "        try_files $uri =404;"
+      print "        default_type application/octet-stream;"
+      print "        add_header Cache-Control \"no-store\";"
+      print "    }"
+      inserted=1
+    }
+    { print }
+    END { if (!inserted) exit 1 }
+  ' "$conf" > "$tmp"; then
+    rm -f "$tmp"
+    printf "$(t b_delivery_repair_failed)\n" "$conf" >&2
+    return 1
+  fi
+  install -m 0644 "$tmp" "$conf"
+  rm -f "$tmp"
+  if ! nginx -t; then
+    cp -a "$backup" "$conf"
+    nginx -t >/dev/null 2>&1 || true
+    printf "$(t b_delivery_repair_failed)\n" "$conf" >&2
+    return 1
+  fi
+  systemctl reload nginx
+  printf "$(t b_delivery_repaired)\n" "$backup"
+}
+
 update_existing_install() {
   echo "$(t update_started)"
   local replace_routing=0 replace_client_routing=0 ruleset_base="" ru_rules_enabled=""
@@ -535,6 +574,7 @@ if [[ -f "$DONE_MARKER" ]]; then
       rm -f "$DONE_MARKER"
       ;;
     3)
+      ensure_b_binary_delivery
       SBP_LANG="$LANG_CODE" "$SCRIPT_DIR/generate-b-installer.sh" /etc/sing-box/vpn-panel.env new
       exit $?
       ;;
