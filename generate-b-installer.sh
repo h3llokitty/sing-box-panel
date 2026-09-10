@@ -7,7 +7,7 @@ source "$SCRIPT_DIR/i18n.sh"
 REQUESTED_LANG="${SBP_LANG:-en}"
 LANG_CODE="$REQUESTED_LANG"
 CONFIG_ENV="${1:-/etc/sing-box/vpn-panel.env}"
-PENDING_A="${2:-0}"
+MODE="${2:-reuse}"
 SING_BOX_BIN=/usr/local/lib/sing-box-panel/sing-box
 SING_BOX_REV_FILE=/usr/lib/sing-box-panel/sing-box-revision
 SERVICE_WAIT_SECONDS=30
@@ -30,6 +30,42 @@ source "$CONFIG_ENV"
 # The installation config stores its original language; an explicit language
 # chosen for this invocation must take precedence.
 LANG_CODE="$REQUESTED_LANG"
+
+GENERATED_NEW_B=0
+if [[ "$MODE" == "new" ]]; then
+  echo
+  echo "$(t new_b_intro)"
+  read -rp "$(t prompt_b_domain_new)" NEW_B_DOMAIN
+  if [[ -z "$NEW_B_DOMAIN" ]]; then
+    echo "$(t b_domain_required)" >&2
+    exit 1
+  fi
+  read -rp "$(t prompt_b_port_new)" NEW_B_PORT
+  NEW_B_PORT=${NEW_B_PORT:-443}
+  if [[ ! "$NEW_B_PORT" =~ ^[0-9]+$ ]] || (( NEW_B_PORT < 1 || NEW_B_PORT > 65535 )); then
+    echo "$(t b_port_invalid)" >&2
+    exit 1
+  fi
+  read -rp "$(t prompt_b_vless_dest_new)" NEW_B_VLESS_DEST
+  if [[ -z "$NEW_B_VLESS_DEST" ]]; then
+    echo "$(t b_vless_dest_required)" >&2
+    exit 1
+  fi
+
+  B_DOMAIN="$NEW_B_DOMAIN"
+  B_PORT="$NEW_B_PORT"
+  B_PASS=$(openssl rand -base64 18 | tr -d '/+=')
+  B_VLESS_UUID=$("$SING_BOX_BIN" generate uuid)
+  B_RKEYS=$("$SING_BOX_BIN" generate reality-keypair)
+  B_REALITY_PRIV=$(printf '%s\n' "$B_RKEYS" | awk '/^PrivateKey:/ {print $2}')
+  B_REALITY_PUB=$(printf '%s\n' "$B_RKEYS" | awk '/^PublicKey:/ {print $2}')
+  B_REALITY_SID=$("$SING_BOX_BIN" generate rand 8 --hex)
+  B_VLESS_DEST="$NEW_B_VLESS_DEST"
+  B_VLESS_SNI="$NEW_B_VLESS_DEST"
+  B_INSTALL_PATH=""
+  B_BINARY_PATH=""
+  GENERATED_NEW_B=1
+fi
 
 required=(A_DOMAIN B_DOMAIN B_PORT B_PASS ACME_EMAIL)
 missing=()
@@ -78,11 +114,18 @@ VLESS
 )
 fi
 
+if [[ "$MODE" == "new" ]]; then
+  B_POST_INSTALL_TEXT="$(t b_standalone_ready)"
+else
+  B_POST_INSTALL_TEXT="$(t b_verify_from_a_reminder1)
+$(t b_verify_from_a_reminder2)"
+fi
+
 PROFILE_PORT="${PROFILE_PORT:-8443}"
 SING_BOX_SHA256=$(sha256sum "$SING_BOX_BIN" | awk '{print $1}')
 SING_BOX_REV=$(cat "$SING_BOX_REV_FILE" 2>/dev/null || printf 'unknown')
 
-if [[ -n "${B_INSTALL_PATH:-}" && -n "${B_BINARY_PATH:-}" && -f "$B_INSTALL_PATH" && -f "$B_BINARY_PATH" ]]; then
+if [[ "$GENERATED_NEW_B" == "0" && -n "${B_INSTALL_PATH:-}" && -n "${B_BINARY_PATH:-}" && -f "$B_INSTALL_PATH" && -f "$B_BINARY_PATH" ]]; then
   printf "$(t generated_b_reused)\n" "$B_INSTALL_PATH"
 else
   echo
@@ -187,22 +230,26 @@ printf "$(t singbox_runtime_label)\n" "\$(/usr/local/lib/sing-box-panel/sing-box
 echo "=================================================="
 echo
 printf "$(t b_dns_reminder)\n" "${B_DOMAIN}" "${B_PORT}"
-echo "$(t b_verify_from_a_reminder1)"
-echo "$(t b_verify_from_a_reminder2)"
+printf '%s\n' "${B_POST_INSTALL_TEXT}"
 BEOF
 
   chmod 0755 "$B_INSTALL_PATH"
-  sed -i \
-    -e '/^B_INSTALL_PATH=/d' \
-    -e '/^B_BINARY_PATH=/d' \
-    "$CONFIG_ENV"
-  printf 'B_INSTALL_PATH="%s"\nB_BINARY_PATH="%s"\n' "$B_INSTALL_PATH" "$B_BINARY_PATH" >> "$CONFIG_ENV"
+  if [[ "$GENERATED_NEW_B" == "0" ]]; then
+    sed -i \
+      -e '/^B_INSTALL_PATH=/d' \
+      -e '/^B_BINARY_PATH=/d' \
+      "$CONFIG_ENV"
+    printf 'B_INSTALL_PATH="%s"\nB_BINARY_PATH="%s"\n' "$B_INSTALL_PATH" "$B_BINARY_PATH" >> "$CONFIG_ENV"
+  fi
 fi
 
 printf "$(t install_b_ready)\n" "$B_DOMAIN"
 echo
 echo "  curl -fsSL https://${A_DOMAIN}:${PROFILE_PORT}/$(basename "$B_INSTALL_PATH") | sudo bash"
 echo
-if [[ "$PENDING_A" == "1" ]]; then
+if [[ "$MODE" == "fresh" ]]; then
   echo "$(t link_will_work_after)"
+fi
+if [[ "$GENERATED_NEW_B" == "1" ]]; then
+  echo "$(t new_b_a_unchanged)"
 fi

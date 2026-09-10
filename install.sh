@@ -535,7 +535,7 @@ if [[ -f "$DONE_MARKER" ]]; then
       rm -f "$DONE_MARKER"
       ;;
     3)
-      SBP_LANG="$LANG_CODE" "$SCRIPT_DIR/generate-b-installer.sh" /etc/sing-box/vpn-panel.env
+      SBP_LANG="$LANG_CODE" "$SCRIPT_DIR/generate-b-installer.sh" /etc/sing-box/vpn-panel.env new
       exit $?
       ;;
     0)
@@ -857,7 +857,7 @@ fi
 source "$CONFIG_ENV"
 
 if [[ "${B_NEEDS_INSTALL:-0}" == "1" ]]; then
-  SBP_LANG="$LANG_CODE" "$SCRIPT_DIR/generate-b-installer.sh" "$CONFIG_ENV" 1
+  SBP_LANG="$LANG_CODE" "$SCRIPT_DIR/generate-b-installer.sh" "$CONFIG_ENV" fresh
   # Reload the published paths written by the generator for later verification and summary output.
   source "$CONFIG_ENV"
 fi

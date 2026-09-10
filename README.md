@@ -83,9 +83,10 @@ Additional masking domains can be added later through the management menu
 
 When install.sh detects /etc/sing-box/.install-done, it does not run cleanup.
 It offers an in-place Git update, a separately confirmed full reinstall, generation
-or recovery of the tokenized server B installer, or cancel. The server B option
-only publishes the script and matching managed binary and prints the deployment
-command; it does not rebuild the A configuration or restart services.
+of a tokenized standalone server B installer, or cancel. The server B option
+only publishes a standalone script and matching managed binary and prints the
+deployment command; it does not change the saved or running A configuration and
+does not restart services.
 During an in-place update, an existing /opt/vpn/server-routing.json can be
 kept (the default) or replaced explicitly with the standard file from Git.
 The same independent choice is offered for the default
