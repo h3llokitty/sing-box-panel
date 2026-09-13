@@ -27,10 +27,10 @@
     <p id="status">Opening VPN app…</p>
     <button id="open" type="button">Open VPN app</button>
     <section id="fallback" hidden>
-      <p id="fallbackText">If the app did not open, install Hiddify or use one of the manual options.</p>
+      <p id="fallbackText">If the app did not open, install a compatible VPN app or use one of the manual options.</p>
       <button id="copyImport" class="secondary" type="button">Copy import link</button>
       <button id="copyProfile" class="secondary" type="button">Copy profile URL</button>
-      <a id="install" class="action secondary" href="https://github.com/hiddify/hiddify-app/releases/latest">Install Hiddify</a>
+      <a id="install" class="action secondary" href="https://sing-box.sagernet.org/clients/">Install VPN app</a>
     </section>
     <p id="error" hidden></p>
   </main>
@@ -40,13 +40,13 @@
       const ru = (navigator.language || '').toLowerCase().startsWith('ru');
       const text = ru ? {
         title: 'Добавить VPN-профиль', opening: 'Открываю VPN-приложение…', open: 'Открыть VPN-приложение',
-        fallback: 'Если приложение не открылось, установите Hiddify или воспользуйтесь ручным вариантом.',
-        copyImport: 'Скопировать ссылку импорта', copyProfile: 'Скопировать URL профиля', install: 'Установить Hiddify',
+        fallback: 'Если приложение не открылось, установите совместимое VPN-приложение или воспользуйтесь ручным вариантом.',
+        copyImport: 'Скопировать ссылку импорта', copyProfile: 'Скопировать URL профиля', install: 'Установить VPN-приложение',
         copied: 'Скопировано', invalid: 'Некорректная ссылка профиля.'
       } : {
         title: 'Add VPN profile', opening: 'Opening VPN app…', open: 'Open VPN app',
-        fallback: 'If the app did not open, install Hiddify or use one of the manual options.',
-        copyImport: 'Copy import link', copyProfile: 'Copy profile URL', install: 'Install Hiddify',
+        fallback: 'If the app did not open, install a compatible VPN app or use one of the manual options.',
+        copyImport: 'Copy import link', copyProfile: 'Copy profile URL', install: 'Install VPN app',
         copied: 'Copied', invalid: 'Invalid profile link.'
       };
       const byId = id => document.getElementById(id);
@@ -64,9 +64,9 @@
       const isAndroid = /Android/i.test(ua);
       const isIOS = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
       if (isIOS) {
-        byId('install').href = 'https://apps.apple.com/app/hiddify-proxy-vpn/id6596777532';
+        byId('install').href = 'https://apps.apple.com/ru/app/speed-bunny/id6670149712?l=en-GB';
       } else if (isAndroid) {
-        byId('install').href = 'https://play.google.com/store/apps/details?id=app.hiddify.com';
+        byId('install').href = 'https://play.google.com/store/apps/details?id=io.nekohasekai.sfa&utm_source=emea_Med';
       }
 
       const match = location.pathname.match(/^\/import\/([A-Za-z0-9_]+)\/?$/);
@@ -81,7 +81,8 @@
       let name = key;
       try { if (location.hash.length > 1) name = decodeURIComponent(location.hash.slice(1)); } catch (_) {}
       const profileUrl = `${location.origin}/${key}.json`;
-      const importUrl = `sing-box://import-remote-profile?url=${encodeURIComponent(profileUrl)}#${encodeURIComponent(name)}`;
+      const importScheme = isIOS ? 'speed-bunny' : 'sing-box';
+      const importUrl = `${importScheme}://import-remote-profile?url=${encodeURIComponent(profileUrl)}#${encodeURIComponent(name)}`;
       byId('profile').textContent = name;
 
       let leftPage = false;
