@@ -350,6 +350,44 @@ ensure_b_binary_delivery() {
   printf "$(t b_delivery_repaired)\n" "$backup"
 }
 
+ensure_smart_import_delivery() {
+  local conf=/etc/nginx/sites-available/profiles backup tmp stamp
+  [[ -f "$conf" ]] || return 1
+  if grep -qE 'location[[:space:]]+~[[:space:]]+\^/import/' "$conf"; then
+    return 0
+  fi
+
+  stamp=$(date +%Y%m%d%H%M%S)
+  backup="${conf}.before-smart-import-${stamp}"
+  tmp=$(mktemp)
+  cp -a "$conf" "$backup"
+  if ! awk '
+    /^[[:space:]]*location \/ \{ return 404; \}$/ && !inserted {
+      print "    location ~ ^/import/[A-Za-z0-9_]+/?$ {"
+      print "        try_files /import.html =404;"
+      print "        default_type text/html;"
+      print "        add_header Cache-Control \"no-store\";"
+      print "        add_header X-Content-Type-Options \"nosniff\";"
+      print "        add_header Referrer-Policy \"no-referrer\";"
+      print "    }"
+      inserted=1
+    }
+    { print }
+    END { if (!inserted) exit 1 }
+  ' "$conf" > "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  install -m 0644 "$tmp" "$conf"
+  rm -f "$tmp"
+  if ! nginx -t; then
+    cp -a "$backup" "$conf"
+    nginx -t >/dev/null 2>&1 || true
+    return 1
+  fi
+  systemctl reload nginx
+}
+
 update_existing_install() {
   echo "$(t update_started)"
   local replace_routing=0 replace_client_routing=0 ruleset_base="" ru_rules_enabled=""
@@ -544,6 +582,8 @@ EOF
   fi
 
   install_traffic_cron
+  install -m 0644 "$SCRIPT_DIR/templates/import.html" /opt/vpn/profiles/import.html
+  ensure_smart_import_delivery
   rm -f /root/sb-panel /root/vpn-setup.sh /root/i18n.sh
 
   printf "$(t update_completed)\n" "$backup"
@@ -933,6 +973,7 @@ cp "$SCRIPT_DIR/templates/client-outbounds.json" /opt/vpn/client-outbounds.json
 install -m 0755 "$SCRIPT_DIR/render-client-profile.py" /opt/vpn/render-client-profile.py
 cp "$SCRIPT_DIR/templates/stats.proto" /opt/vpn/stats.proto
 cp "$SCRIPT_DIR/templates/server-template.json" /opt/vpn/server-template.json
+install -m 0644 "$SCRIPT_DIR/templates/import.html" /opt/vpn/profiles/import.html
 render_routing_template "$SCRIPT_DIR/templates/server-routing.json" /opt/vpn/server-routing.json \
   "${RU_RULES_ENABLED:-0}" "${RULESET_BASE_URL:-}" "DIRECT_RULES"
 render_routing_template "$SCRIPT_DIR/templates/client-routing.json" /opt/vpn/client-routing.json \
@@ -1059,6 +1100,13 @@ server {
         try_files \$uri =404;
         default_type application/octet-stream;
         add_header Cache-Control "no-store";
+    }
+    location ~ ^/import/[A-Za-z0-9_]+/?$ {
+        try_files /import.html =404;
+        default_type text/html;
+        add_header Cache-Control "no-store";
+        add_header X-Content-Type-Options "nosniff";
+        add_header Referrer-Policy "no-referrer";
     }
     location / { return 404; }
 }

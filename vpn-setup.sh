@@ -647,14 +647,18 @@ gen_profile() {
   printf -- "$(t modern_result)\n" "$([[ $modern_ok -eq 1 ]] && t ok_word || t failed_see_above)"
   printf -- "$(t legacy_result)\n" "$([[ $legacy_ok -eq 1 ]] && t ok_word || t failed_see_above)"
 
-  local url enc
+  local url enc profile_name_enc smart_url
   url="https://${PROFILE_HOST}:${PROFILE_PORT}/${KEY}_${TOKEN}.json"
   enc=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=''))" "$url")
-  echo "$(t url_ua_label)"
+  profile_name_enc=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=''))" "$NAME")
+  smart_url="https://${PROFILE_HOST}:${PROFILE_PORT}/import/${KEY}_${TOKEN}#${profile_name_enc}"
+  echo "$(t smart_link_label)"
+  echo "    $smart_url"
+  echo "$(t raw_profile_url_label)"
   echo "    $url"
-  echo "$(t link_label)"
-  echo "    sing-box://import-remote-profile?url=${enc}#${NAME// /_}"
-  command -v qrencode >/dev/null 2>&1 && { echo "$(t qr_label)"; qrencode -t ansiutf8 "sing-box://import-remote-profile?url=${enc}#${NAME// /_}"; }
+  echo "$(t direct_import_link_label)"
+  echo "    sing-box://import-remote-profile?url=${enc}#${profile_name_enc}"
+  command -v qrencode >/dev/null 2>&1 && { echo "$(t qr_label)"; qrencode -t ansiutf8 "$smart_url"; }
 }
 
 gen_profile_quiet() {  # $1 = ключ клиента, только пересобрать файлы, без вывода блоков

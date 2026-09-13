@@ -1004,6 +1004,15 @@ T[legacy_validator_checksum_failed.ru]="Не совпала контрольна
 T[url_ua_label.en]="  URL (auto-selected by User-Agent):"
 T[url_ua_label.ru]="  URL (авто по User-Agent):"
 
+T[smart_link_label.en]="  Smart import link:"
+T[smart_link_label.ru]="  Умная ссылка импорта:"
+
+T[raw_profile_url_label.en]="  Direct profile URL (manual/fallback):"
+T[raw_profile_url_label.ru]="  Прямой URL профиля (ручной/запасной):"
+
+T[direct_import_link_label.en]="  Direct sing-box link (manual/fallback):"
+T[direct_import_link_label.ru]="  Прямой диплинк sing-box (ручной/запасной):"
+
 T[link_label.en]="  link:"
 T[link_label.ru]="  link:"
 
