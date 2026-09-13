@@ -710,9 +710,13 @@ emit_client() {
   local outbounds_file
   outbounds_file=$(ensure_client_outbounds "$NAME" "$KEY")
   printf -- "$(t client_outbounds_label)\n" "$outbounds_file"
-  echo
-  echo "$(t profile_url_label)"
-  gen_profile || return
+  local profile_output
+  if ! profile_output=$(gen_profile 2>&1); then
+    echo
+    echo "$(t profile_url_label)"
+    printf '%s\n' "$profile_output"
+    return 1
+  fi
   local rendered="$PROFILES/${KEY}_${TOKEN}-modern.json"
   [[ -f "$rendered" ]] || rendered="$PROFILES/${KEY}_${TOKEN}-legacy.json"
   if [[ -f "$rendered" ]]; then
@@ -720,6 +724,9 @@ emit_client() {
     echo "$(t rendered_client_outbounds)"
     jq '.endpoints[]?, .outbounds[]? | select(.tag != "direct" and .tag != "bypass" and .tag != "block")' "$rendered"
   fi
+  echo
+  echo "$(t profile_url_label)"
+  printf '%s\n' "$profile_output"
 }
 
 list_names() {
