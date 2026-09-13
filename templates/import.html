@@ -24,13 +24,13 @@
   <main>
     <h1 id="title">Add VPN profile</h1>
     <p id="profile"></p>
-    <p id="status">Opening sing-box…</p>
-    <button id="open" type="button">Open in sing-box</button>
+    <p id="status">Opening VPN app…</p>
+    <button id="open" type="button">Open VPN app</button>
     <section id="fallback" hidden>
-      <p id="fallbackText">If the app did not open, install sing-box or use one of the manual options.</p>
+      <p id="fallbackText">If the app did not open, install Hiddify or use one of the manual options.</p>
       <button id="copyImport" class="secondary" type="button">Copy import link</button>
       <button id="copyProfile" class="secondary" type="button">Copy profile URL</button>
-      <a id="install" class="action secondary" href="https://sing-box.sagernet.org/clients/">Install sing-box</a>
+      <a id="install" class="action secondary" href="https://github.com/hiddify/hiddify-app/releases/latest">Install Hiddify</a>
     </section>
     <p id="error" hidden></p>
   </main>
@@ -39,14 +39,14 @@
       'use strict';
       const ru = (navigator.language || '').toLowerCase().startsWith('ru');
       const text = ru ? {
-        title: 'Добавить VPN-профиль', opening: 'Открываю sing-box…', open: 'Открыть в sing-box',
-        fallback: 'Если приложение не открылось, установите sing-box или воспользуйтесь ручным вариантом.',
-        copyImport: 'Скопировать ссылку импорта', copyProfile: 'Скопировать URL профиля', install: 'Установить sing-box',
+        title: 'Добавить VPN-профиль', opening: 'Открываю VPN-приложение…', open: 'Открыть VPN-приложение',
+        fallback: 'Если приложение не открылось, установите Hiddify или воспользуйтесь ручным вариантом.',
+        copyImport: 'Скопировать ссылку импорта', copyProfile: 'Скопировать URL профиля', install: 'Установить Hiddify',
         copied: 'Скопировано', invalid: 'Некорректная ссылка профиля.'
       } : {
-        title: 'Add VPN profile', opening: 'Opening sing-box…', open: 'Open in sing-box',
-        fallback: 'If the app did not open, install sing-box or use one of the manual options.',
-        copyImport: 'Copy import link', copyProfile: 'Copy profile URL', install: 'Install sing-box',
+        title: 'Add VPN profile', opening: 'Opening VPN app…', open: 'Open VPN app',
+        fallback: 'If the app did not open, install Hiddify or use one of the manual options.',
+        copyImport: 'Copy import link', copyProfile: 'Copy profile URL', install: 'Install Hiddify',
         copied: 'Copied', invalid: 'Invalid profile link.'
       };
       const byId = id => document.getElementById(id);
@@ -59,6 +59,15 @@
       byId('copyImport').textContent = text.copyImport;
       byId('copyProfile').textContent = text.copyProfile;
       byId('install').textContent = text.install;
+
+      const ua = navigator.userAgent || '';
+      const isAndroid = /Android/i.test(ua);
+      const isIOS = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      if (isIOS) {
+        byId('install').href = 'https://apps.apple.com/app/hiddify-proxy-vpn/id6596777532';
+      } else if (isAndroid) {
+        byId('install').href = 'https://play.google.com/store/apps/details?id=app.hiddify.com';
+      }
 
       const match = location.pathname.match(/^\/import\/([A-Za-z0-9_]+)\/?$/);
       if (!match) {
