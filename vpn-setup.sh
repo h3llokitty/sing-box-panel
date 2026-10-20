@@ -256,7 +256,8 @@ ensure_client_routing() {
       install -m 0600 "$legacy_routing" "$routing_file"
       cmp -s "$legacy_routing" "$routing_file" && rm -f "$legacy_routing"
     else
-      install -m 0600 "$CLIENT_ROUTING_TEMPLATE" "$routing_file"
+      printf '%s\n' '{}' > "$routing_file"
+      chmod 0600 "$routing_file"
     fi
   fi
   printf '%s' "$routing_file"
@@ -610,7 +611,7 @@ gen_profile() {
 
   modern_new="${base}-modern.json.new"
   if ! python3 "$CLIENT_PROFILE_RENDERER" --variant modern --template "$TEMPLATE" \
-      --routing "$routing_file" --outbounds "$outbounds_file" --output "$modern_new"; then
+      --global-routing "$CLIENT_ROUTING_TEMPLATE" --routing "$routing_file" --outbounds "$outbounds_file" --output "$modern_new"; then
     echo "$(t json_error_modern)"
     rm -f "$modern_new"
   elif ! sing-box check -c "$modern_new" >/dev/null 2>&1; then
@@ -624,7 +625,7 @@ gen_profile() {
 
   legacy_new="${base}-legacy.json.new"
   if ! python3 "$CLIENT_PROFILE_RENDERER" --variant legacy --template "$TEMPLATE_LEGACY" \
-      --routing "$routing_file" --outbounds "$outbounds_file" --output "$legacy_new"; then
+      --global-routing "$CLIENT_ROUTING_TEMPLATE" --routing "$routing_file" --outbounds "$outbounds_file" --output "$legacy_new"; then
     echo "$(t json_error_legacy)"
     rm -f "$legacy_new"
   elif [[ ! -x "$LEGACY_SING_BOX" ]]; then

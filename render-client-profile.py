@@ -184,17 +184,47 @@ def validate_config(config):
                 fail("E_SELECTOR_DEFAULT", f"{path}.default", str(default))
 
 
+def merge_routing(global_policy, device_policy):
+    for label, policy in (("global-routing", global_policy), ("routing", device_policy)):
+        if not isinstance(policy, dict):
+            fail("E_OBJECT", label)
+    inherit = device_policy.get("inherit_global", True)
+    if not isinstance(inherit, bool):
+        fail("E_TYPE", "routing.inherit_global", "expected boolean")
+    if not inherit:
+        return device_policy
+    merged = {}
+    for key in ("rule_set", "common_rules", "modern_rules", "legacy_rules", "rules"):
+        items = []
+        tags = set()
+        for label, policy in (("global-routing", global_policy), ("routing", device_policy)):
+            for item in require_array(policy.get(key, []), f"{label}.{key}"):
+                require_object(item, f"{label}.{key}[]")
+                if key == "rule_set":
+                    tag = item.get("tag")
+                    if tag in tags:
+                        continue
+                    tags.add(tag)
+                if item not in items:
+                    items.append(copy.deepcopy(item))
+        merged[key] = items
+    return merged
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--variant", choices=("modern", "legacy"), required=True)
     parser.add_argument("--template", required=True)
     parser.add_argument("--routing", required=True)
+    parser.add_argument("--global-routing")
     parser.add_argument("--outbounds", required=True)
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
     base = resolve(load_json(args.template, "template"), substitutions(env("SBP_VLESS_DEST")))
     policy = load_json(args.routing, "routing")
+    if args.global_routing:
+        policy = merge_routing(load_json(args.global_routing, "global-routing"), policy)
     outbound_policy = load_json(args.outbounds, "outbounds")
     require_object(outbound_policy, "outbounds")
 

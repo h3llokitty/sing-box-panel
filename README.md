@@ -90,7 +90,8 @@ does not restart services.
 During an in-place update, an existing /opt/vpn/server-routing.json can be
 kept (the default) or replaced explicitly with the standard file from Git.
 The same independent choice is offered for the default
-`/opt/vpn/client-routing.json`. The repository-owned
+`/opt/vpn/client-routing.json`, which is inherited by all devices on every
+profile rebuild. The repository-owned
 `/opt/vpn/client-outbounds.json` is the default for new devices. Per-device
 routing and outbound files are never overwritten by an update.
 Every update creates a rollback backup under `/opt/vpn/backups/update-*`.
@@ -162,7 +163,15 @@ transactionally on the first manager run. Conflicting files are never
 overwritten.
 
 Run `/opt/vpn/sb-panel --rebuild-profiles` after editing routing manually, or use
-the corresponding service-menu command. Published modern/legacy profile URLs
+the corresponding service-menu command (5 → 8). Global rules from
+`/opt/vpn/client-routing.json` are applied first, followed by unique device rules.
+Rule sets are deduplicated by tag, with the global definition taking priority.
+New device routing files start as `{}`. Existing files are preserved as additional
+rules; old copied rules still present there remain active even if removed from
+the global file. Remove those local copies to inherit global removals too.
+Set `"inherit_global": false` in a device routing file to use only that file.
+Refresh the remote subscription on the device after rebuilding.
+Published modern/legacy profile URLs
 do not change.
 
 The per-device `_outbounds.json` is also created once and then preserved. It
@@ -216,7 +225,7 @@ config.env.example      — reference list of parameters (install.sh asks for th
 templates/
 template.json           — client profile for sing-box 1.12+ (modern)
 template-legacy.json     — client profile for sing-box 1.11.x (legacy)
-client-routing.json      — default route rule sets and policy rules for new clients
+client-routing.json      — shared route rule sets and policy rules for all clients
 client-outbounds.json    — default endpoint/outbound templates for new clients
 server-template.json     — technical server configuration template
 server-routing.json      — server route rule sets and policy rules
