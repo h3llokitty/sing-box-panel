@@ -11,15 +11,24 @@ class RoutingMergeTests(unittest.TestCase):
     def setUp(self):
         self.shared = {"rules": [{"domain_keyword": ["habr", "okitty.ru"], "outbound": "Select"}]}
 
-    def test_old_device_snapshot_is_covered(self):
-        device = {"rules": [{"domain_keyword": ["habr"], "outbound": "Select"}]}
+    def test_device_exception_precedes_shared_policy(self):
+        device = {"rules": [{"domain_keyword": ["habr"], "outbound": "direct"}]}
         original = copy.deepcopy(device)
-        self.assertEqual(merge(self.shared, device)["rules"], self.shared["rules"])
+        self.assertEqual(merge(self.shared, device)["rules"], device["rules"] + self.shared["rules"])
         self.assertEqual(device, original)
 
     def test_preserve_additional_device_domains_and_order(self):
         device = {"rules": [{"domain_keyword": ["habr", "custom"], "outbound": "Select"}]}
-        self.assertEqual(merge(self.shared, device)["rules"], self.shared["rules"] + device["rules"])
+        self.assertEqual(merge(self.shared, device)["rules"], device["rules"] + self.shared["rules"])
+
+    def test_shared_changes_do_not_leave_stale_device_copies(self):
+        device = {"rules": [{"domain_suffix": ["custom.test"], "outbound": "direct"}]}
+        self.assertEqual(merge({}, device)["rules"], device["rules"])
+
+    def test_device_ruleset_overrides_shared_tag(self):
+        shared = {"rule_set": [{"tag": "custom", "type": "remote", "url": "https://shared.test/a.srs"}]}
+        device = {"rule_set": [{"tag": "custom", "type": "remote", "url": "https://user.test/a.srs"}]}
+        self.assertEqual(merge(shared, device)["rule_set"], device["rule_set"])
 
     def test_preserve_different_outbound(self):
         device = {"rules": [{"domain_keyword": ["habr"], "outbound": "direct"}]}

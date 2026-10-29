@@ -163,16 +163,19 @@ transactionally on the first manager run. Conflicting files are never
 overwritten.
 
 Run `/opt/vpn/sb-panel --rebuild-profiles` after editing routing manually, or use
-the corresponding service-menu command (5 → 8). Global rules from
-`/opt/vpn/client-routing.json` are applied first, followed by unique device rules.
-Rule sets are deduplicated by tag, with the global definition taking priority.
-Domain routes already covered by an earlier rule with the same outbound are
-omitted too: a local `habr` rule is redundant after a shared `[habr, okitty.ru]`
-rule. Rules are never combined or reordered during this check.
-New device routing files start as `{}`. Existing files are preserved as additional
-rules; old copied rules still present there remain active even if removed from
-the global file. Remove those local copies to inherit global removals too.
-Set `"inherit_global": false` in a device routing file to use only that file.
+the corresponding service-menu command (5 → 8). The shared policy lives only in
+`/opt/vpn/client-routing.json` and is read on every rebuild. Device `_routing.json`
+files contain only device-specific additions and overrides; new files start as
+`{}`. Within each policy section, device rules precede shared rules so a specific
+exception can override the shared routing. Device rule-set definitions also take
+priority over shared definitions with the same tag. Exact duplicates are omitted.
+The common and variant sections still precede the ordinary `rules` section.
+Set `"inherit_global": false` to use a completely independent device policy.
+
+Old device files created by copying the shared template need a one-time cleanup:
+back them up and remove only entries confirmed to be unchanged template copies.
+Keep all custom entries. Do not subtract current shared rules on every rebuild:
+an explicit device exception must survive future changes to the shared policy.
 Refresh the remote subscription on the device after rebuilding.
 Published modern/legacy profile URLs
 do not change.

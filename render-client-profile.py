@@ -184,28 +184,6 @@ def validate_config(config):
                 fail("E_SELECTOR_DEFAULT", f"{path}.default", str(default))
 
 
-def domain_rule_covers(earlier, later):
-    """Recognize redundant domain routes without reordering or widening rules."""
-    matchers = {"domain", "domain_suffix", "domain_keyword", "domain_regex"}
-    if set(earlier) != set(later) or not (set(later) & matchers):
-        return False
-    # Keep logical, inverted and other compound rules out of this optimization.
-    if set(later) - matchers - {"outbound", "action"}:
-        return False
-    if not later.get("outbound") or later.get("action", "route") != "route":
-        return False
-    for key, value in later.items():
-        if key in matchers:
-            previous = earlier[key]
-            if not isinstance(value, list) or not isinstance(previous, list):
-                return False
-            if not value or not all(entry in previous for entry in value):
-                return False
-        elif value != earlier[key]:
-            return False
-    return True
-
-
 def merge_routing(global_policy, device_policy):
     for label, policy in (("global-routing", global_policy), ("routing", device_policy)):
         if not isinstance(policy, dict):
@@ -219,7 +197,7 @@ def merge_routing(global_policy, device_policy):
     for key in ("rule_set", "common_rules", "modern_rules", "legacy_rules", "rules"):
         items = []
         tags = set()
-        for label, policy in (("global-routing", global_policy), ("routing", device_policy)):
+        for label, policy in (("routing", device_policy), ("global-routing", global_policy)):
             for item in require_array(policy.get(key, []), f"{label}.{key}"):
                 require_object(item, f"{label}.{key}[]")
                 if key == "rule_set":
@@ -227,7 +205,7 @@ def merge_routing(global_policy, device_policy):
                     if tag in tags:
                         continue
                     tags.add(tag)
-                if item not in items and not any(domain_rule_covers(previous, item) for previous in items):
+                if item not in items:
                     items.append(copy.deepcopy(item))
         merged[key] = items
     return merged
