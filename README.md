@@ -166,6 +166,9 @@ Run `/opt/vpn/sb-panel --rebuild-profiles` after editing routing manually, or us
 the corresponding service-menu command (5 → 8). Global rules from
 `/opt/vpn/client-routing.json` are applied first, followed by unique device rules.
 Rule sets are deduplicated by tag, with the global definition taking priority.
+Domain routes already covered by an earlier rule with the same outbound are
+omitted too: a local `habr` rule is redundant after a shared `[habr, okitty.ru]`
+rule. Rules are never combined or reordered during this check.
 New device routing files start as `{}`. Existing files are preserved as additional
 rules; old copied rules still present there remain active even if removed from
 the global file. Remove those local copies to inherit global removals too.
