@@ -214,6 +214,14 @@ Client routing files separate portable policy rules by compatibility level:
 DNS interception, resolution, and sniffing remain in the profile templates as
 mandatory transport plumbing rather than editable policy.
 
+The default shared policy routes private LAN, loopback and link-local destinations
+directly on the client and allows QUIC/443. Multicast rejection remains in the
+variant-specific sections. To access a chained server B without sending the
+connection back through B itself, add its public IP as an `ip_cidr` / `direct`
+rule to the shared client policy and server policy, before broad proxy rules.
+Existing shared policy files are preserved during updates; apply these changes
+there explicitly, rebuild profiles, and refresh the subscription on each client.
+
 ## Server B requirements
 
 A separate sing-box instance with a Hysteria2 inbound (and optionally
