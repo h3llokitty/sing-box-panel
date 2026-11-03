@@ -350,6 +350,36 @@ ensure_b_binary_delivery() {
   printf "$(t b_delivery_repaired)\n" "$backup"
 }
 
+ensure_versioned_profile_delivery() {
+  local conf=/etc/nginx/sites-available/profiles ua=/etc/nginx/conf.d/singbox-ua.conf backup
+  [[ -f "$conf" && -f "$ua" ]] || return 1
+  backup="/opt/vpn/backups/profile-delivery-$(date +%Y%m%d%H%M%S)"
+  install -d -m 0700 "$backup"
+  cp -a "$conf" "$backup/profiles"
+  cp -a "$ua" "$backup/singbox-ua.conf"
+  if ! python3 - "$conf" <<'PYEOF'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+if "(legacy|modern|modern14)" not in text:
+    if "(legacy|modern)" not in text:
+        raise SystemExit("profile variant location not found")
+    path.write_text(text.replace("(legacy|modern)", "(legacy|modern|modern14)"))
+PYEOF
+  then
+    cp -a "$backup/profiles" "$conf"
+    return 1
+  fi
+  install -m 0644 "$SCRIPT_DIR/templates/singbox-ua.conf" "$ua"
+  if ! nginx -t || ! systemctl reload nginx; then
+    cp -a "$backup/profiles" "$conf"
+    cp -a "$backup/singbox-ua.conf" "$ua"
+    nginx -t && systemctl reload nginx || true
+    return 1
+  fi
+}
+
 ensure_smart_import_delivery() {
   local conf=/etc/nginx/sites-available/profiles backup tmp stamp
   [[ -f "$conf" ]] || return 1
@@ -584,6 +614,7 @@ EOF
   install_traffic_cron
   install -m 0644 "$SCRIPT_DIR/templates/import.html" /opt/vpn/profiles/import.html
   ensure_smart_import_delivery
+  ensure_versioned_profile_delivery
   rm -f /root/sb-panel /root/vpn-setup.sh /root/i18n.sh
 
   printf "$(t update_completed)\n" "$backup"
@@ -1046,18 +1077,7 @@ fi
 
 if (( INSTALL_STEP < 9 )); then
 step "$(t step9)"
-cat > /etc/nginx/conf.d/singbox-ua.conf <<'NGINX'
-map $http_user_agent $sb_variant {
-    default "modern";
-    "~sing-box[ /](0|1)\.([0-9]|1[01])(\.|\))"  "legacy";
-}
-map $request_uri $profile_key {
-    ~^/(?<k>[A-Za-z0-9_]+)\.json  $k;
-    default "-";
-}
-log_format profile_access
-    '$time_iso8601 | ip=$remote_addr | key=$profile_key | variant=$sb_variant | ua="$http_user_agent"';
-NGINX
+install -m 0644 "$SCRIPT_DIR/templates/singbox-ua.conf" /etc/nginx/conf.d/singbox-ua.conf
 
 if [[ -s "/etc/letsencrypt/live/${A_DOMAIN}/fullchain.pem" && \
       -s "/etc/letsencrypt/live/${A_DOMAIN}/privkey.pem" ]]; then
@@ -1087,7 +1107,7 @@ server {
         set \$base \$1;
         rewrite ^ /\$base-\$sb_variant.json last;
     }
-    location ~ ^/[A-Za-z0-9_]+-(legacy|modern)\.json\$ {
+    location ~ ^/[A-Za-z0-9_]+-(legacy|modern|modern14)\.json\$ {
         try_files \$uri =404;
         add_header Cache-Control "no-store";
     }

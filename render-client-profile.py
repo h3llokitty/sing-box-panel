@@ -211,15 +211,30 @@ def merge_routing(global_policy, device_policy):
     return merged
 
 
+def migrate_rule_set_http_clients(config):
+    """Use 1.14 HTTP clients without changing each rule-set's download route."""
+    for item in config.get("route", {}).get("rule_set", []):
+        if item.get("type") != "remote":
+            continue
+        detour = item.pop("download_detour", None)
+        if "http_client" not in item:
+            item["http_client"] = {"detour": detour or config["route"]["final"]}
+        elif detour:
+            client = item["http_client"]
+            if not isinstance(client, dict) or client.get("detour") != detour:
+                fail("E_HTTP_CLIENT_CONFLICT", "route.rule_set", str(item.get("tag")))
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--variant", choices=("modern", "legacy"), required=True)
+    parser.add_argument("--variant", choices=("modern", "modern14", "legacy"), required=True)
     parser.add_argument("--template", required=True)
     parser.add_argument("--routing", required=True)
     parser.add_argument("--global-routing")
     parser.add_argument("--outbounds", required=True)
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
+    policy_variant = "modern" if args.variant == "modern14" else args.variant
 
     base = resolve(load_json(args.template, "template"), substitutions(env("SBP_VLESS_DEST")))
     policy = load_json(args.routing, "routing")
@@ -230,7 +245,7 @@ def main():
 
     rule_sets = require_array(policy.get("rule_set", []), "routing.rule_set")
     common_rules = require_array(policy.get("common_rules", []), "routing.common_rules")
-    variant_rules = require_array(policy.get(f"{args.variant}_rules", []), f"routing.{args.variant}_rules")
+    variant_rules = require_array(policy.get(f"{policy_variant}_rules", []), f"routing.{policy_variant}_rules")
     rules = require_array(policy.get("rules", []), "routing.rules")
     base["route"]["rule_set"].extend(copy.deepcopy(rule_sets))
     base["route"]["rules"].extend(copy.deepcopy(common_rules + variant_rules + rules))
@@ -261,8 +276,8 @@ def main():
 
     extras = require_array(outbound_policy.get("extra_outbounds", []), "outbounds.extra_outbounds")
     variant_extras = require_array(
-        outbound_policy.get(f"{args.variant}_extra_outbounds", []),
-        f"outbounds.{args.variant}_extra_outbounds",
+        outbound_policy.get(f"{policy_variant}_extra_outbounds", []),
+        f"outbounds.{policy_variant}_extra_outbounds",
     )
     extras = resolve(copy.deepcopy(extras + variant_extras), substitutions(env("SBP_VLESS_DEST")))
     base["outbounds"].extend(proxy_entries + extras)
@@ -294,6 +309,8 @@ def main():
         if domain and domain not in dns_domains:
             dns_domains.append(domain)
 
+    if args.variant == "modern14":
+        migrate_rule_set_http_clients(base)
     validate_config(base)
     with open(args.output, "w", encoding="utf-8") as output:
         json.dump(base, output, ensure_ascii=False, indent=2)

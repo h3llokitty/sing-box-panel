@@ -580,7 +580,7 @@ CONF
 }
 
 gen_profile() {
-  local base routing_file outbounds_file modern_new legacy_new modern_ok=0 legacy_ok=0
+  local base routing_file outbounds_file modern_new modern14_new legacy_new modern_ok=0 modern14_ok=0 legacy_ok=0
   routing_file=$(ensure_client_routing "$NAME" "$KEY")
   outbounds_file=$(ensure_client_outbounds "$NAME" "$KEY")
   if [[ -n "${WG_PUB:-}" ]]; then
@@ -623,6 +623,20 @@ gen_profile() {
     modern_ok=1
   fi
 
+  modern14_new="${base}-modern14.json.new"
+  if ! python3 "$CLIENT_PROFILE_RENDERER" --variant modern14 --template "$TEMPLATE" \
+      --global-routing "$CLIENT_ROUTING_TEMPLATE" --routing "$routing_file" --outbounds "$outbounds_file" --output "$modern14_new"; then
+    echo "$(t modern14_check_failed)"
+    rm -f "$modern14_new"
+  elif ! sing-box check -c "$modern14_new" >/dev/null 2>&1; then
+    echo "$(t modern14_check_failed)"
+    sing-box check -c "$modern14_new" 2>&1 | grep -v WARN | head -4 || true
+    rm -f "$modern14_new"
+  else
+    mv -f "$modern14_new" "${base}-modern14.json"
+    modern14_ok=1
+  fi
+
   legacy_new="${base}-legacy.json.new"
   if ! python3 "$CLIENT_PROFILE_RENDERER" --variant legacy --template "$TEMPLATE_LEGACY" \
       --global-routing "$CLIENT_ROUTING_TEMPLATE" --routing "$routing_file" --outbounds "$outbounds_file" --output "$legacy_new"; then
@@ -640,11 +654,12 @@ gen_profile() {
     legacy_ok=1
   fi
 
-  if [[ $modern_ok -eq 0 && $legacy_ok -eq 0 ]]; then
+  if [[ $modern14_ok -eq 0 || ( $modern_ok -eq 0 && $legacy_ok -eq 0 ) ]]; then
     echo "$(t both_variants_failed)"
     return 1
   fi
-  chmod 0644 "${base}-modern.json" "${base}-legacy.json" 2>/dev/null || true
+  chmod 0644 "${base}-modern.json" "${base}-modern14.json" "${base}-legacy.json" 2>/dev/null || true
+  printf -- "$(t modern14_result)\n" "$([[ $modern14_ok -eq 1 ]] && t ok_word || t failed_see_above)"
   printf -- "$(t modern_result)\n" "$([[ $modern_ok -eq 1 ]] && t ok_word || t failed_see_above)"
   printf -- "$(t legacy_result)\n" "$([[ $legacy_ok -eq 1 ]] && t ok_word || t failed_see_above)"
 
@@ -1073,9 +1088,9 @@ known = set()
 for path in glob.glob(os.path.join(profiles, "*-modern.json")):
     known.add(os.path.basename(path)[:-len("-modern.json")])
 
-requests = {"modern": 0, "legacy": 0}
+requests = {"modern14": 0, "modern": 0, "legacy": 0}
 latest = {}
-pattern = re.compile(r"^(\S+).*\| key=([^ |]+) \| variant=(modern|legacy) \|")
+pattern = re.compile(r"^(\S+).*\| key=([^ |]+) \| variant=(modern14|modern|legacy) \|")
 for path in logs:
     try:
         opener = gzip.open if path.endswith(".gz") else open
@@ -1093,10 +1108,10 @@ for path in logs:
     except (OSError, EOFError):
         continue
 
-profiles_by_variant = {"modern": 0, "legacy": 0}
+profiles_by_variant = {"modern14": 0, "modern": 0, "legacy": 0}
 for _, variant in latest.values():
     profiles_by_variant[variant] += 1
-for variant in ("modern", "legacy"):
+for variant in ("modern14", "modern", "legacy"):
     print(variant, profiles_by_variant[variant], requests[variant])
 PYEOF
   )

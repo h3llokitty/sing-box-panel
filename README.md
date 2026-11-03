@@ -1,7 +1,7 @@
 # sing-box-panel
 
 VPN infrastructure built on sing-box: WireGuard + Hysteria2+salamander + VLESS+Reality,
-with automatic client profile generation, delivery via nginx (auto modern/legacy
+with automatic client profile generation, delivery via nginx (auto modern14/modern/legacy
 selection based on the client's User-Agent), and traffic monitoring via v2ray_api.
 
 ## Architecture
@@ -141,7 +141,7 @@ Main menu:
 4. show a client (profile, QR code, URL)
 5. service — logs, traffic stats, config rebuild, A↔B transport, Reality domains:
    - client request logs
-   - modern/legacy version stats
+   - modern14/modern/legacy version stats
    - live log monitoring
    - rebuild and restart the config (also regenerates all client profiles)
    - traffic statistics (today / 7 days / all-time)
@@ -177,7 +177,7 @@ back them up and remove only entries confirmed to be unchanged template copies.
 Keep all custom entries. Do not subtract current shared rules on every rebuild:
 an explicit device exception must survive future changes to the shared policy.
 Refresh the remote subscription on the device after rebuilding.
-Published modern/legacy profile URLs
+Published profile URLs
 do not change.
 
 The per-device `_outbounds.json` is also created once and then preserved. It
@@ -192,10 +192,21 @@ disables that transport for the device; selector and urltest membership are
 rebuilt from the remaining transports. At least one usable transport must
 remain.
 
-Both variants are rendered to temporary files and published atomically only
-after validation. Modern profiles are checked by the managed runtime;
+All three variants are rendered to temporary files and published atomically only
+after validation. Modern and modern14 profiles are checked by the managed runtime;
 legacy profiles are checked by the separately installed official, checksum-
 verified sing-box 1.11.15 binary. That validator never runs as a service.
+
+Profile delivery selects `legacy` for detected sing-box versions through 1.11,
+`modern` for 1.12–1.13, and `modern14` for 1.14 and later (including beta versions).
+Unknown user agents retain the compatible `modern` default. Subscription URLs
+stay the same. The nginx map is maintained in `templates/singbox-ua.conf` and is
+installed on both new installations and in-place updates.
+
+`modern14` shares modern routing/outbound policy, but converts remote rule-set
+`download_detour` into `http_client.detour` for sing-box 1.14+. Existing explicit
+HTTP clients are preserved; conflicting old/new routes are rejected. Legacy and
+modern profiles retain the old schema, and shared/device policy files need no edits.
 
 When a device uses both WireGuard and proxy transports, the manager stores a
 per-device WireGuard profile mode. WireGuard can be omitted from sing-box JSON,
@@ -207,7 +218,7 @@ previous `Select` + `auto` behavior.
 Client routing files separate portable policy rules by compatibility level:
 
 - `common_rules` are added to both profile variants before user rules;
-- `modern_rules` are added only to the sing-box 1.12+ profile;
+- `modern_rules` are added to both the modern and modern14 profiles;
 - `legacy_rules` are added only to the sing-box 1.11.x profile;
 - `rules` contains the ordinary per-client policy applied after those rules.
 
@@ -237,7 +248,7 @@ i18n.sh                 — translation table (English/Russian) for install.sh
 vpn-setup.sh            — CLI client manager (installed as /opt/vpn/vpn-setup.sh)
 config.env.example      — reference list of parameters (install.sh asks for them itself)
 templates/
-template.json           — client profile for sing-box 1.12+ (modern)
+template.json           — shared base for modern (1.12–1.13) and modern14 (1.14+)
 template-legacy.json     — client profile for sing-box 1.11.x (legacy)
 client-routing.json      — shared route rule sets and policy rules for all clients
 client-outbounds.json    — default endpoint/outbound templates for new clients
@@ -245,4 +256,4 @@ server-template.json     — technical server configuration template
 server-routing.json      — server route rule sets and policy rules
 install-warp.sh        — optional localized Cloudflare WARP installer
 stats.proto              — protobuf schema for traffic statistics collection
-render-client-profile.py — strict modern/legacy client profile renderer
+render-client-profile.py — strict versioned client profile renderer
