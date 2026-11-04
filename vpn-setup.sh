@@ -126,7 +126,8 @@ write_nginx_stream() {
     echo "}"
     echo
     echo "server {"
-    echo "    listen ${A_IP}:${VLESS_PORT};"
+    # A_IP may be a public NAT address that is not assigned to this host.
+    echo "    listen 0.0.0.0:${VLESS_PORT};"
     echo "    ssl_preread on;"
     echo "    proxy_pass \$vless_backend;"
     echo "}"

@@ -38,6 +38,10 @@ you'll be asked to choose a language on first run. It will then ask for:
 - when that policy is enabled, the external rule-set base URL (defaults to
   `https://unicorns.kz/sources`)
 
+For cloud VMs behind public-IP NAT, enter the external IP as `A_IP`: it is used
+in client profiles and DNS checks. The nginx Reality listener binds to
+`0.0.0.0`, so the external address need not exist on a local network interface.
+
 The installation compiles sing-box from source with `with_v2ray_api` support
 (required for per-client traffic statistics) — this takes 5-15 minutes.
 For an interactive SSH installation it offers to run inside a persistent `tmux`
