@@ -208,9 +208,18 @@ stay the same. The nginx map is maintained in `templates/singbox-ua.conf` and is
 installed on both new installations and in-place updates.
 
 `modern14` shares modern routing/outbound policy, but converts remote rule-set
-`download_detour` into `http_client.detour` for sing-box 1.14+. Existing explicit
+`download_detour` into HTTP client settings for sing-box 1.14+. Plain direct
+downloads use a named top-level HTTP client without `detour`: referencing an
+empty direct outbound is rejected by newer clients, and an empty inline `{}`
+would use the deprecated implicit default. Configured proxy/bound outbounds
+retain their detours. Existing explicit
 HTTP clients are preserved; conflicting old/new routes are rejected. Legacy and
 modern profiles retain the old schema, and shared/device policy files need no edits.
+
+To verify actual initial rule-set downloads (beyond `sing-box check`), run:
+`SING_BOX_TEST_BIN=/path/to/sing-box-1.14+ python3 -B -m unittest discover -s tests`.
+The integration test starts an isolated local HTTP server and a temporary
+sing-box process with no TUN or public listeners.
 
 When a device uses both WireGuard and proxy transports, the manager stores a
 per-device WireGuard profile mode. WireGuard can be omitted from sing-box JSON,

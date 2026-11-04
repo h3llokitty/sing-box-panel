@@ -10,7 +10,7 @@ renderer = runpy.run_path(str(ROOT / "render-client-profile.py"))
 
 class HttpClientMigrationTests(unittest.TestCase):
     def test_preserve_download_routes_and_existing_clients(self):
-        config = {"route": {"final": "Select", "rule_set": [
+        config = {"outbounds": [{"type": "direct", "tag": "direct"}], "route": {"final": "Select", "rule_set": [
             {"type": "remote", "tag": "a", "download_detour": "direct"},
             {"type": "remote", "tag": "b", "download_detour": "Select"},
             {"type": "remote", "tag": "c"},
@@ -20,9 +20,32 @@ class HttpClientMigrationTests(unittest.TestCase):
         original = copy.deepcopy(config)
         renderer["migrate_rule_set_http_clients"](config)
         rules = config["route"]["rule_set"]
-        self.assertEqual([r["http_client"]["detour"] for r in rules[:3]], ["direct", "Select", "Select"])
+        self.assertEqual(rules[0]["http_client"], "ruleset-direct")
+        self.assertEqual([r["http_client"]["detour"] for r in rules[1:3]], ["Select", "Select"])
+        clients = {client["tag"]: client for client in config["http_clients"]}
+        self.assertEqual(clients["ruleset-direct"], {"tag": "ruleset-direct"})
+        self.assertEqual(clients[rules[3]["http_client"]]["headers"], {"X-Test": "1"})
+        self.assertNotIn("detour", clients[rules[3]["http_client"]])
         self.assertTrue(all("download_detour" not in r for r in rules))
-        self.assertEqual(rules[3:], original["route"]["rule_set"][3:])
+        self.assertEqual(rules[4:], original["route"]["rule_set"][4:])
+
+    def test_reuses_named_direct_client_without_tag_collision(self):
+        config = {"outbounds": [{"type": "direct", "tag": "direct"}],
+                  "http_clients": [{"tag": "ruleset-direct", "detour": "Select"}],
+                  "route": {"final": "Select", "rule_set": [
+                      {"type": "remote", "tag": tag, "download_detour": "direct"} for tag in ("a", "b")
+                  ]}}
+        renderer["migrate_rule_set_http_clients"](config)
+        self.assertEqual([r["http_client"] for r in config["route"]["rule_set"]], ["ruleset-direct-2"] * 2)
+        self.assertEqual(len(config["http_clients"]), 2)
+
+    def test_preserves_configured_direct_outbound(self):
+        config = {"outbounds": [{"type": "direct", "tag": "bound", "bind_interface": "eth0"}],
+                  "route": {"final": "Select", "rule_set": [
+                      {"type": "remote", "tag": "a", "download_detour": "bound"}
+                  ]}}
+        renderer["migrate_rule_set_http_clients"](config)
+        self.assertEqual(config["route"]["rule_set"][0]["http_client"], {"detour": "bound"})
 
     def test_reject_ambiguous_download_route(self):
         config = {"route": {"final": "Select", "rule_set": [

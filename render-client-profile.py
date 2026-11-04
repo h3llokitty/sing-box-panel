@@ -213,6 +213,31 @@ def merge_routing(global_policy, device_policy):
 
 def migrate_rule_set_http_clients(config):
     """Use 1.14 HTTP clients without changing each rule-set's download route."""
+    empty_direct_tags = {
+        entry.get("tag") for entry in config.get("outbounds", [])
+        if entry.get("type") == "direct" and not (set(entry) - {"type", "tag"})
+    }
+
+    def direct_client(options=None):
+        # An empty inline {} means implicit default, which is also deprecated.
+        # A named HTTP client without detour explicitly uses the native dialer.
+        options = options or {}
+        clients = config.setdefault("http_clients", [])
+        for client in clients:
+            if client.get("tag") and {k: v for k, v in client.items() if k != "tag"} == options:
+                return client["tag"]
+        tags = {client.get("tag") for client in clients}
+        tag = "ruleset-direct"
+        suffix = 2
+        while tag in tags:
+            tag = f"ruleset-direct-{suffix}"
+            suffix += 1
+        clients.append({"tag": tag, **copy.deepcopy(options)})
+        return tag
+
+    for client in config.get("http_clients", []):
+        if client.get("detour") in empty_direct_tags:
+            client.pop("detour")
     for item in config.get("route", {}).get("rule_set", []):
         if item.get("type") != "remote":
             continue
@@ -223,6 +248,10 @@ def migrate_rule_set_http_clients(config):
             client = item["http_client"]
             if not isinstance(client, dict) or client.get("detour") != detour:
                 fail("E_HTTP_CLIENT_CONFLICT", "route.rule_set", str(item.get("tag")))
+        client = item.get("http_client")
+        if isinstance(client, dict) and client.get("detour") in empty_direct_tags:
+            options = {k: v for k, v in client.items() if k != "detour"}
+            item["http_client"] = direct_client(options)
 
 
 def main():
