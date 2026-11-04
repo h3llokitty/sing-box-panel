@@ -1,0 +1,71 @@
+{
+  "wireguard": {
+    "type": "wireguard",
+    "tag": "__WG_TAG__",
+    "system": false,
+    "mtu": 1280,
+    "address": ["__WG_ADDRESS__"],
+    "private_key": "__WG_PRIVATE_KEY__",
+    "peers": [
+      {
+        "address": "__A_IP__",
+        "port": "__WG_PORT__",
+        "public_key": "__WG_PUBLIC_KEY__",
+        "pre_shared_key": "__WG_PRESHARED_KEY__",
+        "allowed_ips": "__WG_ALLOWED_IPS__",
+        "persistent_keepalive_interval": 25
+      }
+    ]
+  },
+  "hysteria2": {
+    "type": "hysteria2",
+    "tag": "__HY2_TAG__",
+    "server": "__A_DOMAIN__",
+    "server_port": "__HY2_PORT__",
+    "password": "__HY2_PASSWORD__",
+    "obfs": {
+      "type": "salamander",
+      "password": "__HY2_OBFS__"
+    },
+    "tls": {
+      "enabled": true,
+      "server_name": "__A_DOMAIN__",
+      "alpn": ["h3"]
+    }
+  },
+  "vless": {
+    "type": "vless",
+    "tag": "__VLESS_TAG__",
+    "server": "__A_DOMAIN__",
+    "server_port": "__VLESS_PORT__",
+    "uuid": "__VLESS_UUID__",
+    "flow": "xtls-rprx-vision",
+    "tls": {
+      "enabled": true,
+      "server_name": "__VLESS_DOMAIN__",
+      "utls": {
+        "enabled": true,
+        "fingerprint": "chrome"
+      },
+      "reality": {
+        "enabled": true,
+        "public_key": "__REALITY_PUBLIC_KEY__",
+        "short_id": "__REALITY_SHORT_ID__"
+      }
+    }
+  },
+  "urltest": {
+    "type": "urltest",
+    "tag": "auto",
+    "url": "https://www.gstatic.com/generate_204",
+    "interval": "15m",
+    "tolerance": 100
+  },
+  "selector": {
+    "type": "selector",
+    "tag": "Select"
+  },
+  "extra_outbounds": [],
+  "modern_extra_outbounds": [],
+  "legacy_extra_outbounds": []
+}
